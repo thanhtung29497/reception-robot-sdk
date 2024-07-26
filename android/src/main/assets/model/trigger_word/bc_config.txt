@@ -1,0 +1,2 @@
+# sample_rate, n_fft, f_max, n_mels, win_length, hop_length, output_size, transpose_mel, htk, norm, norm_mel, log_mel
+8000 256 8000 40 200 80 4040 0 1 0 1 1e-9
