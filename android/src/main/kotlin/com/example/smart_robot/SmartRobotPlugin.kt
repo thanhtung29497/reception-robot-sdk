@@ -366,7 +366,9 @@ class SmartRobotPlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHa
                                     convThreshold = convLowThreshold
                                 }
                                 val conv = triggerWord.convModelDetect(buffer)
-                                if (conv != null && conv.score > convThreshold) {
+                                print("Conv Score: ")
+                                println(conv?.score)
+                                if (conv != null) {
                                     startVAD()
                                     kotlinx.coroutines.withContext(Dispatchers.Main) {
                                         eventSink?.success("start_vad")

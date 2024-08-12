@@ -7,7 +7,7 @@ import 'package:record/record.dart';
 import 'package:smart_robot/smart_robot.dart';
 
 void main() {
-  runApp(const MyApp());
+  runApp(const MaterialApp(home: MyApp()));
 }
 
 class MyApp extends StatefulWidget {
@@ -25,6 +25,27 @@ class _MyAppState extends State<MyApp> {
   bool isSpeech = false;
   String path = "";
 
+  void _showAlertDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Trigger Word Detected'),
+          content: const Text('Start detecting VAD'),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+              },
+              child: const Text('OK'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+
   @override
   void initState() {
     super.initState();
@@ -32,7 +53,8 @@ class _MyAppState extends State<MyApp> {
 
     _triggerWordSubscription = _smartRobotPlugin.speechDetectEvent.listen((event) async {
       try {
-        if (event == "StartDetect") {
+        if (event == "start_vad") {
+          _showAlertDialog(context);
           final Directory tempDir = await getTemporaryDirectory();
           await record.start(
               const RecordConfig(
