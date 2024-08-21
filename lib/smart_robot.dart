@@ -52,6 +52,10 @@ class SmartRobot {
     return SmartRobotPlatform.instance.stopVAD();
   }
 
+  Future<void> startVAD() {
+    return SmartRobotPlatform.instance.startVAD();
+  }
+
   Future<void> playWaveformAudio(Int16List audioData) {
     return SmartRobotPlatform.instance.playWaveformAudio(audioData);
   }

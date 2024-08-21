@@ -132,6 +132,11 @@ class SmartRobotPlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHa
                 detectVAD(result, filePath)
             }
 
+            Constants.startVAD -> {
+                startVAD()
+                result.success("success")
+            }
+
             Constants.startRecord -> {
                 startTriggerWord()
             }
@@ -318,7 +323,7 @@ class SmartRobotPlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHa
         val bcHighThreshold = 0.8
         val convLowThreshold = 0.6
         val convHighThreshold = 0.8
-        var bcThreshold = 0.8
+        var bcThreshold = 0.6
         var convThreshold = 0.8
         var lastBCScore = 0f
         var lastConvScore = 0f
@@ -369,7 +374,6 @@ class SmartRobotPlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHa
                                 print("Conv Score: ")
                                 println(conv?.score)
                                 if (conv != null) {
-                                    startVAD()
                                     kotlinx.coroutines.withContext(Dispatchers.Main) {
                                         eventSink?.success("start_vad")
                                     }
@@ -423,7 +427,8 @@ class SmartRobotPlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHa
         if (vadAudioRecord?.state == AudioRecord.STATE_INITIALIZED) {
             GlobalScope.launch(Dispatchers.IO) {
                 vadAudioRecord?.startRecording()
-                var buffer = FloatArray(4800)
+                val buffer = FloatArray(4800)
+                var isFirstSegment = true
 
                 while (vadAudioRecord?.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
                     val bytesRead: Int =
@@ -431,30 +436,64 @@ class SmartRobotPlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHa
 
                     if (bytesRead > 0 && !isSpeaking) {
                         audio.addAll(buffer.toList())
+                        print(audio.size)
                         if (audio.size >= 16000) {
                             val newAudio =
                                 audio.subList(0, 16000).toFloatArray()
                             audio = ArrayList(audio.subList(4800, audio.size))
-                            val result = vad.detectVAD(newAudio)
-                            println(result?.score)
-                            if (result?.isSpeech == true) {
-                                audioSegment.add(newAudio.toList() as ArrayList<Float>)
-                            } else {
-                                if (audioSegment.isNotEmpty()) {
-                                    val fullChunk = audioSegment[0]
-                                    if (audioSegment.size > 1) {
-                                        for (i in 1 until audioSegment.size) {
-                                            fullChunk.addAll(audioSegment[i].subList(11200, 16000))
-                                        }
+                            vad.detectVAD(newAudio)?.also {result ->
+                                print(result.score)
+                                if (result.isSpeech) {
+                                    val recordedSegment = when (isFirstSegment) {
+                                        true -> RecordedSegment(newAudio, RecordedSegment.Type.FIRST)
+                                        else -> RecordedSegment(
+                                            newAudio.toList().subList(11200, 16000).toFloatArray(),
+                                            RecordedSegment.Type.CONTINUE
+                                        )
                                     }
-                                    val filePath = context.filesDir.absolutePath + "/" + System.currentTimeMillis() +  ".wav"
-                                    audioWriter.writeWavFile(filePath, 16000, fullChunk.toFloatArray())
-                                    audioSegment.clear()
-                                    kotlinx.coroutines.withContext(Dispatchers.Main) {
-                                        eventSink?.success(filePath)
+
+                                    isFirstSegment = false
+
+                                    GlobalScope.launch(Dispatchers.Main) {
+                                        eventSink?.success(recordedSegment.toMap())
                                     }
+
+                                } else if (!isFirstSegment) {
+                                    val recordedSegment = RecordedSegment(
+                                        newAudio.toList().subList(11200, 16000).toFloatArray(),
+                                        RecordedSegment.Type.END
+                                    )
+
+                                    GlobalScope.launch(Dispatchers.Main) {
+                                        eventSink?.success(recordedSegment.toMap())
+                                    }
+
+                                    isFirstSegment = true
                                 }
                             }
+//                            println(result?.score)
+//                            if (result?.isSpeech == true) {
+//                                audioSegment.add(newAudio.toList() as ArrayList<Float>)
+//
+//                                kotlinx.coroutines.withContext(Dispatchers.Main) {
+//                                    eventSink?.success(newAudio)
+//                                }
+//                            } else {
+//                                if (audioSegment.isNotEmpty()) {
+//                                    val fullChunk = audioSegment[0]
+//                                    if (audioSegment.size > 1) {
+//                                        for (i in 1 until audioSegment.size) {
+//                                            fullChunk.addAll(audioSegment[i].subList(11200, 16000))
+//                                        }
+//                                    }
+//                                    val filePath = context.filesDir.absolutePath + "/" + System.currentTimeMillis() +  ".wav"
+//                                    audioWriter.writeWavFile(filePath, 16000, fullChunk.toFloatArray())
+//                                    audioSegment.clear()
+//                                    kotlinx.coroutines.withContext(Dispatchers.Main) {
+//                                        eventSink?.success(fullChunk)
+//                                    }
+//                                }
+//                            }
                         }
                     }
                 }

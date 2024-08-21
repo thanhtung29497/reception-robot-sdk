@@ -71,6 +71,11 @@ class MethodChannelSmartRobot extends SmartRobotPlatform {
   }
 
   @override
+  Future<void> startVAD() async {
+    await methodChannel.invokeMethod<void>('startVAD');
+  }
+
+  @override
   Future<void> stopVAD() async {
     await methodChannel.invokeMethod<void>('stopVAD');
   }

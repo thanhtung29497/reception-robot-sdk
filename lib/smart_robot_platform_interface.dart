@@ -61,6 +61,10 @@ abstract class SmartRobotPlatform extends PlatformInterface {
       throw UnimplementedError('stopTriggerWord() has not been implemented.');
   }
 
+  Future<void> startVAD() {
+    throw UnimplementedError('startVAD() has not been implemented.');
+  }
+
   Future<void> stopVAD() {
     throw UnimplementedError('stopVAD() has not been implemented.');
   }

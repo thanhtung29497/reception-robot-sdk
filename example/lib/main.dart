@@ -1,3 +1,4 @@
+import 'dart:ffi';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'dart:async';
@@ -55,43 +56,8 @@ class _MyAppState extends State<MyApp> {
       try {
         if (event == "start_vad") {
           _showAlertDialog(context);
-          final Directory tempDir = await getTemporaryDirectory();
-          await record.start(
-              const RecordConfig(
-                sampleRate: 16000,
-                numChannels: 1,
-                encoder: AudioEncoder.wav,
-              ),
-              path:
-              '${tempDir.path}/${DateTime.now().millisecondsSinceEpoch}.wav');
-          print("Start detect");
-
-        } else if (event == "vad_is_speech") {
-          isSpeech = true;
-
-        } else if (event == "vad_is_not_speech") {
-          bool isRecording = await record.isRecording();
-          if (isRecording) {
-            String? path = await record.stop();
-            if (path != null) {
-              path = path.replaceAll("file://", "");
-              if (isSpeech) {
-                print("Speech");
-                print(path);
-              } else {
-                deleteFile(path);
-              }
-            }
-            await record.start(
-                const RecordConfig(
-                  sampleRate: 16000,
-                  numChannels: 1,
-                  encoder: AudioEncoder.wav,
-                ),
-                path:
-                '${(await getTemporaryDirectory()).path}/${DateTime.now().millisecondsSinceEpoch}.wav');
-          }
-          isSpeech = false;
+        } else {
+          print("Event type: ${event['type']}");
         }
       } catch (e) {
         print(e);
@@ -209,7 +175,7 @@ class _MyAppState extends State<MyApp> {
                     ),
                     child: const Center(
                       child: Text(
-                        'Start',
+                        'Start Trigger Word',
                         style: TextStyle(
                           color: Colors.white,
                           fontSize: 20,
@@ -217,52 +183,59 @@ class _MyAppState extends State<MyApp> {
                       ),
                     )),
               ),
-              SizedBox(
+              const SizedBox(
                 height: 20,
               ),
               InkWell(
                 onTap: () async {
-                  // if (await record.hasPermission()) {
-                  //   final Directory tempDir = await getTemporaryDirectory();
-                  //   await record.start(
-                  //       const RecordConfig(
-                  //         sampleRate: 16000,
-                  //         numChannels: 1,
-                  //         encoder: AudioEncoder.wav,
-                  //       ),
-                  //       path:
-                  //           '${tempDir.path}/${DateTime.now().millisecondsSinceEpoch}.wav');
-                  //   // record.startStream(const RecordConfig(
-                  //   //   sampleRate: 16000,
-                  //   //   numChannels: 1,
-                  //   //   encoder: AudioEncoder.wav,
-                  //   // ));
-                  //   // final stream = await record.startStream(const RecordConfig(encoder: AudioEncoder.aacLc
-                  //   // ));
-                  //   // stream.listen((data) {
-                  //   //   print(data);
-                  //   // });
-                  //   await Future.delayed(const Duration(milliseconds: 10000));
-                  //   String? path = await record.stop();
-                  //   if (path != null) {
-                  //     // try {
-                  //     //   final waveformData = await _playerController
-                  //     //       .extractWaveformData(path: path);
-                  //     //   print(waveformData);
-                  //     // } catch (e) {
-                  //     //   print(e);
-                  //     // }
-                  //     // File file = File(path);
-                  //     // print(file.readAsBytesSync());
-                  //     // final a = await _smartRobotPlugin.detectTriggerWordModel(path);
-                  //
-                  //     print(path);
-                  //
-                  //     // String? result = await _speechProcessingPlugin.processAudio(path);
-                  //   }
-                  // } else {
-                  //   print('No permission');
-                  // }
+                  await _smartRobotPlugin.stopTriggerWord();
+                },
+                child: Container(
+                    height: 50,
+                    width: 200,
+                    decoration: const BoxDecoration(
+                      borderRadius: BorderRadius.all(Radius.circular(10)),
+                      color: Colors.blueAccent,
+                    ),
+                    child: const Center(
+                      child: Text(
+                        'Stop Trigger Word',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 20,
+                        ),
+                      ),
+                    )),
+              ),
+              const SizedBox(
+                height: 20,
+              ),
+              InkWell(
+                onTap: () async {
+                  await _smartRobotPlugin.startVAD();
+                },
+                child: Container(
+                    height: 50,
+                    width: 200,
+                    decoration: const BoxDecoration(
+                      borderRadius: BorderRadius.all(Radius.circular(10)),
+                      color: Colors.blueAccent,
+                    ),
+                    child: const Center(
+                      child: Text(
+                        'Start VAD',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 20,
+                        ),
+                      ),
+                    )),
+              ),
+              const SizedBox(
+                height: 20,
+              ),
+              InkWell(
+                onTap: () async {
                   await _smartRobotPlugin.stopVAD();
                 },
                 child: Container(
@@ -274,7 +247,7 @@ class _MyAppState extends State<MyApp> {
                     ),
                     child: const Center(
                       child: Text(
-                        'Stop',
+                        'Stop VAD',
                         style: TextStyle(
                           color: Colors.white,
                           fontSize: 20,
@@ -282,7 +255,6 @@ class _MyAppState extends State<MyApp> {
                       ),
                     )),
               ),
-
             ],
           ),
         ),
