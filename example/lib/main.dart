@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:ffi';
 import 'dart:io';
 import 'package:flutter/material.dart';
@@ -6,6 +7,8 @@ import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 import 'package:smart_robot/smart_robot.dart';
+import 'package:web_socket_channel/io.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
 
 void main() {
   runApp(const MaterialApp(home: MyApp()));
@@ -25,6 +28,7 @@ class _MyAppState extends State<MyApp> {
   StreamSubscription? _triggerWordSubscription;
   bool isSpeech = false;
   String path = "";
+  IOWebSocketChannel? channel;
 
   void _showAlertDialog(BuildContext context) {
     showDialog(
@@ -51,13 +55,35 @@ class _MyAppState extends State<MyApp> {
   void initState() {
     super.initState();
     initPlatformState();
+    initWebSocket();
 
     _triggerWordSubscription = _smartRobotPlugin.speechDetectEvent.listen((event) async {
       try {
         if (event == "start_vad") {
           _showAlertDialog(context);
         } else {
-          print("Event type: ${event['type']}");
+          // print("Event type: ${event['type']}");
+          print("Event data type: ${event["data"]["type"]}");
+          // print("Event audioSegment: ${event['data']['audioSegment']}");
+
+          if (channel != null) {
+            final flag = event["data"]["type"];
+            final data = base64.encode(event["data"]["audioSegment"]);
+
+            final message = jsonEncode({
+                "data": data,
+                "flag": flag == 2 ? 1 : flag,
+              });
+
+            channel!.sink.add(message);
+
+            if (flag == 2) {
+              channel!.sink.add(jsonEncode({
+                "data": "",
+                "flag": 2,
+              }));
+            }
+          }
         }
       } catch (e) {
         print(e);
@@ -71,6 +97,34 @@ class _MyAppState extends State<MyApp> {
     if (file.existsSync()) {
       file.deleteSync();
       print('Audio file deleted: $path');
+    }
+  }
+
+  Future<void> initWebSocket() async {
+    try {
+
+      // replace host, deviceToken and lang with your own
+      const host = "ws://180.93.182.208:8888/api/v1/chatbot/streaming";
+      const deviceToken = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJTUjAwMSJ9.zwygxNNeu1MH6pF3UZohspd8i8Ca6IYtE3jmoHDNBqQ";
+      const lang = "vi";
+
+      // connect to websocket
+      final wsUrl = Uri.parse("$host?token=$deviceToken&lang=$lang");
+      channel = IOWebSocketChannel.connect(wsUrl);
+      await channel?.ready;
+
+      print("Websocket server connected!");
+
+      // listen to websocket
+      channel?.stream.listen((event) {
+        print("Event from websocket: $event");
+      }, onError: (error) {
+        print("Error from websocket: $error");
+      }, onDone: () {
+        print("Websocket is done");
+      });
+    } on WebSocketChannelException catch (e) {
+      print("Error when connect to websocket: $e");
     }
   }
 
@@ -123,47 +177,6 @@ class _MyAppState extends State<MyApp> {
               Text('Running on: $_platformVersion\n'),
               InkWell(
                 onTap: () async {
-                  // if (await record.hasPermission()) {
-                  //   final Directory tempDir = await getTemporaryDirectory();
-                  //   await record.start(
-                  //       const RecordConfig(
-                  //         sampleRate: 16000,
-                  //         numChannels: 1,
-                  //         encoder: AudioEncoder.wav,
-                  //       ),
-                  //       path:
-                  //           '${tempDir.path}/${DateTime.now().millisecondsSinceEpoch}.wav');
-                  //   // record.startStream(const RecordConfig(
-                  //   //   sampleRate: 16000,
-                  //   //   numChannels: 1,
-                  //   //   encoder: AudioEncoder.wav,
-                  //   // ));
-                  //   // final stream = await record.startStream(const RecordConfig(encoder: AudioEncoder.aacLc
-                  //   // ));
-                  //   // stream.listen((data) {
-                  //   //   print(data);
-                  //   // });
-                  //   await Future.delayed(const Duration(milliseconds: 10000));
-                  //   String? path = await record.stop();
-                  //   if (path != null) {
-                  //     // try {
-                  //     //   final waveformData = await _playerController
-                  //     //       .extractWaveformData(path: path);
-                  //     //   print(waveformData);
-                  //     // } catch (e) {
-                  //     //   print(e);
-                  //     // }
-                  //     // File file = File(path);
-                  //     // print(file.readAsBytesSync());
-                  //     // final a = await _smartRobotPlugin.detectTriggerWordModel(path);
-                  //
-                  //     print(path);
-                  //
-                  //     // String? result = await _speechProcessingPlugin.processAudio(path);
-                  //   }
-                  // } else {
-                  //   print('No permission');
-                  // }
                   await _smartRobotPlugin.startRecord();
                 },
                 child: Container(

@@ -14,6 +14,8 @@ import android.media.MediaRecorder
 import android.net.Uri
 import android.util.Log
 import androidx.core.app.ActivityCompat
+import com.example.smart_robot.event.AudioEvent
+import com.example.smart_robot.event.RecordedSegment
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
@@ -26,8 +28,11 @@ import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
 import org.json.JSONStringer
 import java.io.File
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import kotlin.math.abs
 import kotlin.math.log10
+
 
 /** SmartRobotPlugin */
 class SmartRobotPlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHandler {
@@ -399,9 +404,36 @@ class SmartRobotPlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHa
         }
     }
 
+    // Convert PCM PCM 16-bit to PCM float
+    private fun pcm16toFloat(pcms: ByteArray): FloatArray {
+        val floaters = FloatArray(pcms.size)
+        for (i in pcms.indices) {
+            floaters[i] = pcms[i] / 32768.0f
+        }
+        return floaters
+    }
+
+    // Convert PCM float to PCM 16-bit, then convert to ByteArray
+    private fun pcmFloatTo16(pcms: FloatArray): ShortArray {
+        val shorts = ShortArray(pcms.size)
+        for (i in pcms.indices) {
+            shorts[i] = (pcms[i] * 32768).toInt().toShort()
+        }
+        return shorts
+    }
+
+    private fun shortArrayToByteArray(shortArray: ShortArray): ByteArray {
+        val byteArray = ByteArray(shortArray.size * 2)
+        val buffer = ByteBuffer.wrap(byteArray)
+        buffer.order(ByteOrder.LITTLE_ENDIAN)
+        for (value in shortArray) {
+            buffer.putShort(value)
+        }
+        return byteArray
+    }
+
     private fun startVAD() {
         var audio: ArrayList<Float> = arrayListOf()
-        val audioSegment: ArrayList<ArrayList<Float>> = arrayListOf()
 
         val bufferSize = AudioRecord.getMinBufferSize(
             16000,
@@ -436,40 +468,46 @@ class SmartRobotPlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHa
 
                     if (bytesRead > 0 && !isSpeaking) {
                         audio.addAll(buffer.toList())
-                        print(audio.size)
                         if (audio.size >= 16000) {
-                            val newAudio =
-                                audio.subList(0, 16000).toFloatArray()
+                            val newAudio = audio.subList(0, 16000).toFloatArray()
                             audio = ArrayList(audio.subList(4800, audio.size))
-                            vad.detectVAD(newAudio)?.also {result ->
-                                print(result.score)
-                                if (result.isSpeech) {
-                                    val recordedSegment = when (isFirstSegment) {
-                                        true -> RecordedSegment(newAudio, RecordedSegment.Type.FIRST)
-                                        else -> RecordedSegment(
-                                            newAudio.toList().subList(11200, 16000).toFloatArray(),
+
+                            print("Running VAD model")
+
+                            vad.detectVAD(newAudio)?.apply {
+                                val pcm16Audio = pcmFloatTo16(newAudio)
+                                print("VAD Score: $score")
+                                val recordedSegment = when {
+                                    isSpeech && isFirstSegment -> {
+                                        isFirstSegment = false
+                                        RecordedSegment(shortArrayToByteArray(pcm16Audio), RecordedSegment.Type.FIRST)
+                                    }
+
+                                    isSpeech && !isFirstSegment ->
+                                        RecordedSegment(
+                                            shortArrayToByteArray(pcm16Audio.toList().subList(11200, 16000).toShortArray()),
                                             RecordedSegment.Type.CONTINUE
+                                        )
+
+                                    !isSpeech && !isFirstSegment -> {
+                                        isFirstSegment = true
+                                        RecordedSegment(
+                                            shortArrayToByteArray(pcm16Audio.toList().subList(11200, 16000).toShortArray()),
+                                            RecordedSegment.Type.LAST
                                         )
                                     }
 
-                                    isFirstSegment = false
-
-                                    GlobalScope.launch(Dispatchers.Main) {
-                                        eventSink?.success(recordedSegment.toMap())
-                                    }
-
-                                } else if (!isFirstSegment) {
-                                    val recordedSegment = RecordedSegment(
-                                        newAudio.toList().subList(11200, 16000).toFloatArray(),
-                                        RecordedSegment.Type.END
-                                    )
-
-                                    GlobalScope.launch(Dispatchers.Main) {
-                                        eventSink?.success(recordedSegment.toMap())
-                                    }
-
-                                    isFirstSegment = true
+                                    else -> null
                                 }
+
+                                recordedSegment?.let { segment ->
+                                    GlobalScope.launch(Dispatchers.Main) {
+                                        eventSink?.success(AudioEvent(
+                                            AudioEvent.Type.VAD_RECORDING, segment
+                                        ).toMap())
+                                    }
+                                }
+
                             }
 //                            println(result?.score)
 //                            if (result?.isSpeech == true) {
