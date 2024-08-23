@@ -1,11 +1,11 @@
 import 'dart:convert';
-import 'dart:ffi';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'dart:async';
 import 'package:flutter/services.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
+import 'package:smart_robot/audio_event.dart';
+import 'package:smart_robot/audio_event_listener.dart';
 import 'package:smart_robot/smart_robot.dart';
 import 'package:web_socket_channel/io.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
@@ -21,22 +21,21 @@ class MyApp extends StatefulWidget {
   State<MyApp> createState() => _MyAppState();
 }
 
-class _MyAppState extends State<MyApp> {
+class _MyAppState extends State<MyApp> implements AudioEventListener {
   String _platformVersion = 'Unknown';
   final _smartRobotPlugin = SmartRobot();
   final record = AudioRecorder();
-  StreamSubscription? _triggerWordSubscription;
   bool isSpeech = false;
   String path = "";
   IOWebSocketChannel? channel;
 
-  void _showAlertDialog(BuildContext context) {
+  void _showAlertDialog(BuildContext context, String title, String content) {
     showDialog(
       context: context,
       builder: (BuildContext context) {
         return AlertDialog(
-          title: const Text('Trigger Word Detected'),
-          content: const Text('Start detecting VAD'),
+          title: Text(title),
+          content: Text(content),
           actions: [
             TextButton(
               onPressed: () {
@@ -50,46 +49,47 @@ class _MyAppState extends State<MyApp> {
     );
   }
 
+  @override
+  void onTriggerWordDetected() {
+    _showAlertDialog(context, "Trigger word detected!", "");
+    _smartRobotPlugin.startVAD();
+  }
+
+  @override
+  void onVADRecording(VADEvent event) {
+    if (channel != null) {
+      final data = base64.encode(event.audioSegment);
+
+      final message = jsonEncode({
+        "data": data,
+        "flag": event.type.index,
+      });
+
+      channel!.sink.add(message);
+    }
+  }
+
+  @override
+  void onVADEnd() {
+    if (channel != null) {
+      channel!.sink.add(jsonEncode({
+        "data": "",
+        "flag": 2,
+      }));
+    }
+  }
+
+  @override
+  void onVADTimeout() {
+    print("VAD Timeout");
+  }
 
   @override
   void initState() {
     super.initState();
     initPlatformState();
     initWebSocket();
-
-    _triggerWordSubscription = _smartRobotPlugin.speechDetectEvent.listen((event) async {
-      try {
-        if (event == "start_vad") {
-          _showAlertDialog(context);
-        } else {
-          // print("Event type: ${event['type']}");
-          print("Event data type: ${event["data"]["type"]}");
-          // print("Event audioSegment: ${event['data']['audioSegment']}");
-
-          if (channel != null) {
-            final flag = event["data"]["type"];
-            final data = base64.encode(event["data"]["audioSegment"]);
-
-            final message = jsonEncode({
-                "data": data,
-                "flag": flag == 2 ? 1 : flag,
-              });
-
-            channel!.sink.add(message);
-
-            if (flag == 2) {
-              channel!.sink.add(jsonEncode({
-                "data": "",
-                "flag": 2,
-              }));
-            }
-          }
-        }
-      } catch (e) {
-        print(e);
-      }
-
-    });
+    _smartRobotPlugin.addAudioEventListener(this);
   }
 
   Future<void> deleteFile(String path) async {
@@ -176,9 +176,7 @@ class _MyAppState extends State<MyApp> {
             children: [
               Text('Running on: $_platformVersion\n'),
               InkWell(
-                onTap: () async {
-                  await _smartRobotPlugin.startRecord();
-                },
+                onTap: () => _smartRobotPlugin.startRecord(),
                 child: Container(
                     height: 50,
                     width: 200,

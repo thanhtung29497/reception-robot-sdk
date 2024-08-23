@@ -355,8 +355,9 @@ class SmartRobotPlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHa
 
         if (triggerWordAudioRecord?.state == AudioRecord.STATE_INITIALIZED) {
             GlobalScope.launch(Dispatchers.IO) {
+                print("Start trigger word")
                 triggerWordAudioRecord?.startRecording()
-                var buffer = FloatArray(8000)
+                val buffer = FloatArray(8000)
                 while (triggerWordAudioRecord?.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
                     val bytesRead: Int =
                         triggerWordAudioRecord?.read(buffer, 0, buffer.size, AudioRecord.READ_BLOCKING) ?: 0
@@ -366,34 +367,41 @@ class SmartRobotPlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHa
                             if (lastBCScore > bcLowThreshold) {
                                 bcThreshold = bcLowThreshold
                             }
-                            val bcScore = triggerWord.bcModelDetect(buffer)
-                            print("BCScore: ")
-                            println(bcScore?.score)
+                            triggerWord.bcModelDetect(buffer)?.apply {
+                                print("BCScore: $score")
+
+                                if (score > bcThreshold) {
+                                    kotlinx.coroutines.withContext(Dispatchers.Main) {
+                                        eventSink?.success(AudioEvent.triggerWordDetected())
+                                    }
+                                }
+                            }
+
 
                             // Start conv model detect
-                            if (bcScore != null && bcScore.score > bcThreshold) {
-                                if (lastConvScore > convLowThreshold) {
-                                    convThreshold = convLowThreshold
-                                }
-                                val conv = triggerWord.convModelDetect(buffer)
-                                print("Conv Score: ")
-                                println(conv?.score)
-                                if (conv != null) {
-                                    kotlinx.coroutines.withContext(Dispatchers.Main) {
-                                        eventSink?.success("start_vad")
-                                    }
-                                    stopTriggerWord()
-                                    break
-                                }
-                                lastConvScore = conv?.score ?: 0f
-                                if (lastConvScore < convLowThreshold) {
-                                    convThreshold = convHighThreshold
-                                }
-                            }
-                            lastBCScore = bcScore?.score ?: 0f
-                            if (lastBCScore < bcLowThreshold) {
-                                bcThreshold = bcHighThreshold
-                            }
+//                            if (bcScore != null && bcScore.score > bcThreshold) {
+//                                if (lastConvScore > convLowThreshold) {
+//                                    convThreshold = convLowThreshold
+//                                }
+//                                val conv = triggerWord.convModelDetect(buffer)
+//                                print("Conv Score: ")
+//                                println(conv?.score)
+//                                if (conv != null) {
+//                                    kotlinx.coroutines.withContext(Dispatchers.Main) {
+//                                        eventSink?.success("start_vad")
+//                                    }
+//                                    stopTriggerWord()
+//                                    break
+//                                }
+//                                lastConvScore = conv?.score ?: 0f
+//                                if (lastConvScore < convLowThreshold) {
+//                                    convThreshold = convHighThreshold
+//                                }
+//                            }
+//                            lastBCScore = bcScore?.score ?: 0f
+//                            if (lastBCScore < bcLowThreshold) {
+//                                bcThreshold = bcHighThreshold
+//                            }
                         } else {
                             continue
                         }
@@ -502,9 +510,7 @@ class SmartRobotPlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHa
 
                                 recordedSegment?.let { segment ->
                                     GlobalScope.launch(Dispatchers.Main) {
-                                        eventSink?.success(AudioEvent(
-                                            AudioEvent.Type.VAD_RECORDING, segment
-                                        ).toMap())
+                                        eventSink?.success(AudioEvent.vadRecording(segment))
                                     }
                                 }
 
@@ -555,7 +561,7 @@ class SmartRobotPlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHa
     }
 
     private fun stopVAD() {
-        println("VAD state: ")
+        println("Stopping VAD Recording: ")
         println(vadAudioRecord?.state)
         if (vadAudioRecord?.state == AudioRecord.RECORDSTATE_RECORDING
             || vadAudioRecord?.state == AudioRecord.READ_NON_BLOCKING
