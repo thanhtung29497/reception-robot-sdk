@@ -14,6 +14,8 @@ import android.media.MediaRecorder
 import android.net.Uri
 import android.util.Log
 import androidx.core.app.ActivityCompat
+import com.example.smart_robot.event.AudioEvent
+import com.example.smart_robot.event.RecordedSegment
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
@@ -26,8 +28,11 @@ import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
 import org.json.JSONStringer
 import java.io.File
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import kotlin.math.abs
 import kotlin.math.log10
+
 
 /** SmartRobotPlugin */
 class SmartRobotPlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHandler {
@@ -83,6 +88,12 @@ class SmartRobotPlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHa
 
     companion object {
         private lateinit var assetManager: AssetManager
+        private const val TAG = "SmartRobotPlugin"
+        private const val VAD_SAMPLE_RATE = 16000
+        private const val VAD_WINDOW_SIZE = 16000
+        private const val VAD_WINDOW_STEP = 4800
+        private const val TRIGGER_WORD_SAMPLE_RATE = 8000
+        private const val VAD_TIMEOUT_IN_MILLISECONDS = 10000
 
         @JvmStatic
         fun registerWith(registrar: PluginRegistry.Registrar) {
@@ -132,6 +143,13 @@ class SmartRobotPlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHa
                 detectVAD(result, filePath)
             }
 
+            Constants.startVAD -> {
+                call.argument<Int>("timeoutInMilliseconds")?.let {
+                    startVAD(it)
+                } ?: startVAD()
+                result.success("success")
+            }
+
             Constants.startRecord -> {
                 startTriggerWord()
             }
@@ -141,8 +159,6 @@ class SmartRobotPlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHa
             }
 
             Constants.stopVAD -> {
-                println("Stop record")
-                stopTriggerWord()
                 stopVAD()
                 result.success("success")
             }
@@ -318,7 +334,7 @@ class SmartRobotPlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHa
         val bcHighThreshold = 0.8
         val convLowThreshold = 0.6
         val convHighThreshold = 0.8
-        var bcThreshold = 0.8
+        var bcThreshold = 0.6
         var convThreshold = 0.8
         var lastBCScore = 0f
         var lastConvScore = 0f
@@ -345,8 +361,9 @@ class SmartRobotPlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHa
 
         if (triggerWordAudioRecord?.state == AudioRecord.STATE_INITIALIZED) {
             GlobalScope.launch(Dispatchers.IO) {
+                Log.d(TAG, "Start trigger word")
                 triggerWordAudioRecord?.startRecording()
-                var buffer = FloatArray(8000)
+                val buffer = FloatArray(8000)
                 while (triggerWordAudioRecord?.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
                     val bytesRead: Int =
                         triggerWordAudioRecord?.read(buffer, 0, buffer.size, AudioRecord.READ_BLOCKING) ?: 0
@@ -356,35 +373,46 @@ class SmartRobotPlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHa
                             if (lastBCScore > bcLowThreshold) {
                                 bcThreshold = bcLowThreshold
                             }
-                            val bcScore = triggerWord.bcModelDetect(buffer)
-                            print("BCScore: ")
-                            println(bcScore?.score)
+                            val bcScore = triggerWord.bcModelDetect(buffer)?.apply {
+                                Log.d(TAG, "BCScore: $score")
+
+                                if (score > bcThreshold) {
+
+                                    kotlinx.coroutines.withContext(Dispatchers.Main) {
+                                        eventSink?.success(AudioEvent.triggerWordDetected())
+                                    }
+                                }
+                            }
+
+//                            lastBCScore = bcScore?.score ?: 0f
+//                            if (lastBCScore < bcLowThreshold) {
+//                                bcThreshold = bcHighThreshold
+//                            }
 
                             // Start conv model detect
-                            if (bcScore != null && bcScore.score > bcThreshold) {
-                                if (lastConvScore > convLowThreshold) {
-                                    convThreshold = convLowThreshold
-                                }
-                                val conv = triggerWord.convModelDetect(buffer)
-                                print("Conv Score: ")
-                                println(conv?.score)
-                                if (conv != null) {
-                                    startVAD()
-                                    kotlinx.coroutines.withContext(Dispatchers.Main) {
-                                        eventSink?.success("start_vad")
-                                    }
-                                    stopTriggerWord()
-                                    break
-                                }
-                                lastConvScore = conv?.score ?: 0f
-                                if (lastConvScore < convLowThreshold) {
-                                    convThreshold = convHighThreshold
-                                }
-                            }
-                            lastBCScore = bcScore?.score ?: 0f
-                            if (lastBCScore < bcLowThreshold) {
-                                bcThreshold = bcHighThreshold
-                            }
+//                            if (bcScore != null && bcScore.score > bcThreshold) {
+//                                if (lastConvScore > convLowThreshold) {
+//                                    convThreshold = convLowThreshold
+//                                }
+//                                val conv = triggerWord.convModelDetect(buffer)
+//                                print("Conv Score: ")
+//                                println(conv?.score)
+//                                if (conv != null) {
+//                                    kotlinx.coroutines.withContext(Dispatchers.Main) {
+//                                        eventSink?.success("start_vad")
+//                                    }
+//                                    stopTriggerWord()
+//                                    break
+//                                }
+//                                lastConvScore = conv?.score ?: 0f
+//                                if (lastConvScore < convLowThreshold) {
+//                                    convThreshold = convHighThreshold
+//                                }
+//                            }
+//                            lastBCScore = bcScore?.score ?: 0f
+//                            if (lastBCScore < bcLowThreshold) {
+//                                bcThreshold = bcHighThreshold
+//                            }
                         } else {
                             continue
                         }
@@ -395,12 +423,38 @@ class SmartRobotPlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHa
         }
     }
 
-    private fun startVAD() {
-        var audio: ArrayList<Float> = arrayListOf()
-        val audioSegment: ArrayList<ArrayList<Float>> = arrayListOf()
+    // Convert PCM PCM 16-bit to PCM float
+    private fun pcm16toFloat(pcms: ByteArray): FloatArray {
+        val floaters = FloatArray(pcms.size)
+        for (i in pcms.indices) {
+            floaters[i] = pcms[i] / 32768.0f
+        }
+        return floaters
+    }
+
+    // Convert PCM float to PCM 16-bit, then convert to ByteArray
+    private fun pcmFloatTo16(pcms: FloatArray): ShortArray {
+        val shorts = ShortArray(pcms.size)
+        for (i in pcms.indices) {
+            shorts[i] = (pcms[i] * 32768).toInt().toShort()
+        }
+        return shorts
+    }
+
+    private fun shortArrayToByteArray(shortArray: ShortArray): ByteArray {
+        val byteArray = ByteArray(shortArray.size * 2)
+        val buffer = ByteBuffer.wrap(byteArray)
+        buffer.order(ByteOrder.LITTLE_ENDIAN)
+        for (value in shortArray) {
+            buffer.putShort(value)
+        }
+        return byteArray
+    }
+
+    private fun startVAD(timeoutInMilliseconds: Int = VAD_TIMEOUT_IN_MILLISECONDS) {
 
         val bufferSize = AudioRecord.getMinBufferSize(
-            16000,
+            VAD_SAMPLE_RATE,
             AudioFormat.CHANNEL_IN_MONO,
             AudioFormat.ENCODING_PCM_FLOAT
         )
@@ -413,7 +467,7 @@ class SmartRobotPlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHa
         }
         vadAudioRecord = AudioRecord(
             MediaRecorder.AudioSource.MIC,
-            16000,
+            VAD_SAMPLE_RATE,
             AudioFormat.CHANNEL_IN_MONO,
             AudioFormat.ENCODING_PCM_FLOAT,
             bufferSize
@@ -422,39 +476,94 @@ class SmartRobotPlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHa
 
         if (vadAudioRecord?.state == AudioRecord.STATE_INITIALIZED) {
             GlobalScope.launch(Dispatchers.IO) {
+                var audioBuffer: ArrayList<Float> = arrayListOf()
                 vadAudioRecord?.startRecording()
-                var buffer = FloatArray(4800)
+                val tempBuffer = FloatArray(VAD_WINDOW_STEP)
+                var noSpeechYet = true
+                var silenceTimeInFrames = 0
 
                 while (vadAudioRecord?.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
                     val bytesRead: Int =
-                        vadAudioRecord?.read(buffer, 0, buffer.size, AudioRecord.READ_BLOCKING) ?: 0
+                        vadAudioRecord?.read(tempBuffer, 0, tempBuffer.size, AudioRecord.READ_BLOCKING) ?: 0
 
                     if (bytesRead > 0 && !isSpeaking) {
-                        audio.addAll(buffer.toList())
-                        if (audio.size >= 16000) {
-                            val newAudio =
-                                audio.subList(0, 16000).toFloatArray()
-                            audio = ArrayList(audio.subList(4800, audio.size))
-                            val result = vad.detectVAD(newAudio)
-                            println(result?.score)
-                            if (result?.isSpeech == true) {
-                                audioSegment.add(newAudio.toList() as ArrayList<Float>)
-                            } else {
-                                if (audioSegment.isNotEmpty()) {
-                                    val fullChunk = audioSegment[0]
-                                    if (audioSegment.size > 1) {
-                                        for (i in 1 until audioSegment.size) {
-                                            fullChunk.addAll(audioSegment[i].subList(11200, 16000))
-                                        }
+                        audioBuffer.addAll(tempBuffer.toList())
+                        if (audioBuffer.size >= VAD_WINDOW_SIZE) {
+                            val audioWindow = audioBuffer.subList(0, VAD_WINDOW_SIZE).toFloatArray()
+                            audioBuffer = ArrayList(audioBuffer.subList(VAD_WINDOW_STEP, audioBuffer.size))
+
+                            vad.detectVAD(audioWindow)?.apply {
+                                val pcm16Audio = pcmFloatTo16(audioWindow)
+                                Log.d(TAG, "VAD Score: $score")
+                                val recordedSegment = when {
+                                    isSpeech && noSpeechYet -> {
+                                        noSpeechYet = false
+                                        silenceTimeInFrames = 0
+                                        RecordedSegment(shortArrayToByteArray(pcm16Audio), RecordedSegment.Type.FIRST)
                                     }
-                                    val filePath = context.filesDir.absolutePath + "/" + System.currentTimeMillis() +  ".wav"
-                                    audioWriter.writeWavFile(filePath, 16000, fullChunk.toFloatArray())
-                                    audioSegment.clear()
-                                    kotlinx.coroutines.withContext(Dispatchers.Main) {
-                                        eventSink?.success(filePath)
+
+                                    isSpeech && !noSpeechYet ->
+                                        RecordedSegment(
+                                            shortArrayToByteArray(pcm16Audio.toList().subList(
+                                                VAD_WINDOW_SIZE - VAD_WINDOW_STEP, VAD_WINDOW_SIZE).toShortArray()),
+                                            RecordedSegment.Type.CONTINUE
+                                        )
+
+                                    !isSpeech && !noSpeechYet -> {
+                                        noSpeechYet = true
+                                        silenceTimeInFrames += VAD_WINDOW_SIZE
+                                        RecordedSegment(
+                                            byteArrayOf(),
+                                            RecordedSegment.Type.LAST
+                                        )
+                                    }
+
+                                    // not speech and no speech yet
+                                    else -> {
+                                        silenceTimeInFrames += VAD_WINDOW_STEP
+                                        null
                                     }
                                 }
+
+                                recordedSegment?.let { segment ->
+                                    GlobalScope.launch(Dispatchers.Main) {
+                                        eventSink?.success(AudioEvent.vadRecording(segment))
+                                    }
+                                } ?: run {
+                                    val silenceTimeInMilliseconds = (silenceTimeInFrames.toFloat() / VAD_SAMPLE_RATE * 1000)
+                                    Log.d(TAG, "Silence time: %.2f".format(silenceTimeInMilliseconds))
+                                    if (silenceTimeInMilliseconds >= timeoutInMilliseconds) {
+                                        GlobalScope.launch(Dispatchers.Main) {
+                                            silenceTimeInFrames = 0
+                                            eventSink?.success(AudioEvent.vadTimeout())
+                                        }
+                                    }
+                                }
+
                             }
+//                            println(result?.score)
+//                            if (result?.isSpeech == true) {
+//                                audioSegment.add(newAudio.toList() as ArrayList<Float>)
+//
+//                                kotlinx.coroutines.withContext(Dispatchers.Main) {
+//                                    eventSink?.success(newAudio)
+//                                }
+//                            } else {
+//                                if (audioSegment.isNotEmpty()) {
+//                                    val fullChunk = audioSegment[0]
+//                                    if (audioSegment.size > 1) {
+//                                        for (i in 1 until audioSegment.size) {
+//                                            fullChunk.addAll(audioSegment[i].subList(11200, 16000))
+//                                        }
+//                                    }
+//                                    val filePath = context.filesDir.absolutePath + "/" + System.currentTimeMillis() +  ".wav"
+//                                    audioWriter.writeWavFile(filePath, 16000, fullChunk.toFloatArray())
+//                                    audioSegment.clear()
+//                                    kotlinx.coroutines.withContext(Dispatchers.Main) {
+//                                        eventSink?.success(fullChunk)
+//                                    }
+//                                }
+//                            }
                         }
                     }
                 }
@@ -465,8 +574,7 @@ class SmartRobotPlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHa
     }
 
     private fun stopTriggerWord() {
-        println("Trigger word state: ")
-        println(triggerWordAudioRecord?.state)
+        Log.d(TAG, "Stop trigger word, current state: ${triggerWordAudioRecord?.state}")
         if (triggerWordAudioRecord?.state == AudioRecord.RECORDSTATE_RECORDING
             || triggerWordAudioRecord?.state == AudioRecord.READ_NON_BLOCKING
             || triggerWordAudioRecord?.state == AudioRecord.STATE_INITIALIZED) {
@@ -478,8 +586,7 @@ class SmartRobotPlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHa
     }
 
     private fun stopVAD() {
-        println("VAD state: ")
-        println(vadAudioRecord?.state)
+        Log.d(TAG, "Stopping VAD Recording: ${vadAudioRecord?.state}")
         if (vadAudioRecord?.state == AudioRecord.RECORDSTATE_RECORDING
             || vadAudioRecord?.state == AudioRecord.READ_NON_BLOCKING
             || vadAudioRecord?.state == AudioRecord.STATE_INITIALIZED) {

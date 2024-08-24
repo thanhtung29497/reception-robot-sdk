@@ -13,6 +13,7 @@ object Constants {
     const val detectVAD = "detectVAD"
     const val startRecord = "startRecord"
     const val stopTriggerWord = "stopTriggerWord"
+    const val startVAD = "startVAD"
     const val stopVAD = "stopVAD"
     const val playWaveform = "playWaveformAudio"
 }

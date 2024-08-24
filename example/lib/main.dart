@@ -1,10 +1,15 @@
+import 'dart:convert';
+import 'dart:developer';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'dart:async';
 import 'package:flutter/services.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
+import 'package:smart_robot/audio_event.dart';
+import 'package:smart_robot/audio_event_listener.dart';
 import 'package:smart_robot/smart_robot.dart';
+import 'package:web_socket_channel/io.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
 
 void main() {
   runApp(const MaterialApp(home: MyApp()));
@@ -17,21 +22,21 @@ class MyApp extends StatefulWidget {
   State<MyApp> createState() => _MyAppState();
 }
 
-class _MyAppState extends State<MyApp> {
+class _MyAppState extends State<MyApp> implements AudioEventListener {
   String _platformVersion = 'Unknown';
   final _smartRobotPlugin = SmartRobot();
   final record = AudioRecorder();
-  StreamSubscription? _triggerWordSubscription;
   bool isSpeech = false;
   String path = "";
+  IOWebSocketChannel? channel;
 
-  void _showAlertDialog(BuildContext context) {
+  void _showAlertDialog(BuildContext context, String title, String content) {
     showDialog(
       context: context,
       builder: (BuildContext context) {
         return AlertDialog(
-          title: const Text('Trigger Word Detected'),
-          content: const Text('Start detecting VAD'),
+          title: Text(title),
+          content: Text(content),
           actions: [
             TextButton(
               onPressed: () {
@@ -45,59 +50,50 @@ class _MyAppState extends State<MyApp> {
     );
   }
 
+  @override
+  void onTriggerWordDetected() {
+    _showAlertDialog(context, "Trigger word detected!", "");
+    _smartRobotPlugin.stopTriggerWord();
+    _smartRobotPlugin.startVAD(30000);
+  }
+
+  @override
+  void onSpeaking(VADEvent event) {
+    if (channel != null) {
+      final data = base64.encode(event.audioSegment);
+
+      final message = jsonEncode({
+        "data": data,
+        "flag": event.type.index,
+      });
+
+      channel!.sink.add(message);
+    }
+  }
+
+  @override
+  void onSpeechEnd() {
+    if (channel != null) {
+      channel!.sink.add(jsonEncode({
+        "data": "",
+        "flag": 2,
+      }));
+    }
+  }
+
+  @override
+  void onSilenceTimeout() {
+    _showAlertDialog(context, "VAD timeout!", "");
+    _smartRobotPlugin.stopVAD();
+    _smartRobotPlugin.startTriggerWord();
+  }
 
   @override
   void initState() {
     super.initState();
     initPlatformState();
-
-    _triggerWordSubscription = _smartRobotPlugin.speechDetectEvent.listen((event) async {
-      try {
-        if (event == "start_vad") {
-          _showAlertDialog(context);
-          final Directory tempDir = await getTemporaryDirectory();
-          await record.start(
-              const RecordConfig(
-                sampleRate: 16000,
-                numChannels: 1,
-                encoder: AudioEncoder.wav,
-              ),
-              path:
-              '${tempDir.path}/${DateTime.now().millisecondsSinceEpoch}.wav');
-          print("Start detect");
-
-        } else if (event == "vad_is_speech") {
-          isSpeech = true;
-
-        } else if (event == "vad_is_not_speech") {
-          bool isRecording = await record.isRecording();
-          if (isRecording) {
-            String? path = await record.stop();
-            if (path != null) {
-              path = path.replaceAll("file://", "");
-              if (isSpeech) {
-                print("Speech");
-                print(path);
-              } else {
-                deleteFile(path);
-              }
-            }
-            await record.start(
-                const RecordConfig(
-                  sampleRate: 16000,
-                  numChannels: 1,
-                  encoder: AudioEncoder.wav,
-                ),
-                path:
-                '${(await getTemporaryDirectory()).path}/${DateTime.now().millisecondsSinceEpoch}.wav');
-          }
-          isSpeech = false;
-        }
-      } catch (e) {
-        print(e);
-      }
-
-    });
+    initWebSocket();
+    _smartRobotPlugin.addAudioEventListener(this);
   }
 
   Future<void> deleteFile(String path) async {
@@ -105,6 +101,34 @@ class _MyAppState extends State<MyApp> {
     if (file.existsSync()) {
       file.deleteSync();
       print('Audio file deleted: $path');
+    }
+  }
+
+  Future<void> initWebSocket() async {
+    try {
+
+      // replace host, deviceToken and lang with your own
+      const host = "ws://180.93.182.208:8888/api/v1/chatbot/streaming";
+      const deviceToken = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJTUjAwMSJ9.zwygxNNeu1MH6pF3UZohspd8i8Ca6IYtE3jmoHDNBqQ";
+      const lang = "vi";
+
+      // connect to websocket
+      final wsUrl = Uri.parse("$host?token=$deviceToken&lang=$lang");
+      channel = IOWebSocketChannel.connect(wsUrl);
+      await channel?.ready;
+
+      print("Websocket server connected!");
+
+      // listen to websocket
+      channel?.stream.listen((event) {
+        print("Event from websocket: $event");
+      }, onError: (error) {
+        print("Error from websocket: $error");
+      }, onDone: () {
+        print("Websocket is done");
+      });
+    } on WebSocketChannelException catch (e) {
+      print("Error when connect to websocket: $e");
     }
   }
 
@@ -156,49 +180,30 @@ class _MyAppState extends State<MyApp> {
             children: [
               Text('Running on: $_platformVersion\n'),
               InkWell(
+                onTap: () => _smartRobotPlugin.startTriggerWord(),
+                child: Container(
+                    height: 50,
+                    width: 200,
+                    decoration: const BoxDecoration(
+                      borderRadius: BorderRadius.all(Radius.circular(10)),
+                      color: Colors.blueAccent,
+                    ),
+                    child: const Center(
+                      child: Text(
+                        'Start Trigger Word',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 20,
+                        ),
+                      ),
+                    )),
+              ),
+              const SizedBox(
+                height: 20,
+              ),
+              InkWell(
                 onTap: () async {
-                  // if (await record.hasPermission()) {
-                  //   final Directory tempDir = await getTemporaryDirectory();
-                  //   await record.start(
-                  //       const RecordConfig(
-                  //         sampleRate: 16000,
-                  //         numChannels: 1,
-                  //         encoder: AudioEncoder.wav,
-                  //       ),
-                  //       path:
-                  //           '${tempDir.path}/${DateTime.now().millisecondsSinceEpoch}.wav');
-                  //   // record.startStream(const RecordConfig(
-                  //   //   sampleRate: 16000,
-                  //   //   numChannels: 1,
-                  //   //   encoder: AudioEncoder.wav,
-                  //   // ));
-                  //   // final stream = await record.startStream(const RecordConfig(encoder: AudioEncoder.aacLc
-                  //   // ));
-                  //   // stream.listen((data) {
-                  //   //   print(data);
-                  //   // });
-                  //   await Future.delayed(const Duration(milliseconds: 10000));
-                  //   String? path = await record.stop();
-                  //   if (path != null) {
-                  //     // try {
-                  //     //   final waveformData = await _playerController
-                  //     //       .extractWaveformData(path: path);
-                  //     //   print(waveformData);
-                  //     // } catch (e) {
-                  //     //   print(e);
-                  //     // }
-                  //     // File file = File(path);
-                  //     // print(file.readAsBytesSync());
-                  //     // final a = await _smartRobotPlugin.detectTriggerWordModel(path);
-                  //
-                  //     print(path);
-                  //
-                  //     // String? result = await _speechProcessingPlugin.processAudio(path);
-                  //   }
-                  // } else {
-                  //   print('No permission');
-                  // }
-                  await _smartRobotPlugin.startRecord();
+                  await _smartRobotPlugin.stopTriggerWord();
                 },
                 child: Container(
                     height: 50,
@@ -209,7 +214,7 @@ class _MyAppState extends State<MyApp> {
                     ),
                     child: const Center(
                       child: Text(
-                        'Start',
+                        'Stop Trigger Word',
                         style: TextStyle(
                           color: Colors.white,
                           fontSize: 20,
@@ -217,52 +222,35 @@ class _MyAppState extends State<MyApp> {
                       ),
                     )),
               ),
-              SizedBox(
+              const SizedBox(
                 height: 20,
               ),
               InkWell(
                 onTap: () async {
-                  // if (await record.hasPermission()) {
-                  //   final Directory tempDir = await getTemporaryDirectory();
-                  //   await record.start(
-                  //       const RecordConfig(
-                  //         sampleRate: 16000,
-                  //         numChannels: 1,
-                  //         encoder: AudioEncoder.wav,
-                  //       ),
-                  //       path:
-                  //           '${tempDir.path}/${DateTime.now().millisecondsSinceEpoch}.wav');
-                  //   // record.startStream(const RecordConfig(
-                  //   //   sampleRate: 16000,
-                  //   //   numChannels: 1,
-                  //   //   encoder: AudioEncoder.wav,
-                  //   // ));
-                  //   // final stream = await record.startStream(const RecordConfig(encoder: AudioEncoder.aacLc
-                  //   // ));
-                  //   // stream.listen((data) {
-                  //   //   print(data);
-                  //   // });
-                  //   await Future.delayed(const Duration(milliseconds: 10000));
-                  //   String? path = await record.stop();
-                  //   if (path != null) {
-                  //     // try {
-                  //     //   final waveformData = await _playerController
-                  //     //       .extractWaveformData(path: path);
-                  //     //   print(waveformData);
-                  //     // } catch (e) {
-                  //     //   print(e);
-                  //     // }
-                  //     // File file = File(path);
-                  //     // print(file.readAsBytesSync());
-                  //     // final a = await _smartRobotPlugin.detectTriggerWordModel(path);
-                  //
-                  //     print(path);
-                  //
-                  //     // String? result = await _speechProcessingPlugin.processAudio(path);
-                  //   }
-                  // } else {
-                  //   print('No permission');
-                  // }
+                  await _smartRobotPlugin.startVAD();
+                },
+                child: Container(
+                    height: 50,
+                    width: 200,
+                    decoration: const BoxDecoration(
+                      borderRadius: BorderRadius.all(Radius.circular(10)),
+                      color: Colors.blueAccent,
+                    ),
+                    child: const Center(
+                      child: Text(
+                        'Start VAD',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 20,
+                        ),
+                      ),
+                    )),
+              ),
+              const SizedBox(
+                height: 20,
+              ),
+              InkWell(
+                onTap: () async {
                   await _smartRobotPlugin.stopVAD();
                 },
                 child: Container(
@@ -274,7 +262,7 @@ class _MyAppState extends State<MyApp> {
                     ),
                     child: const Center(
                       child: Text(
-                        'Stop',
+                        'Stop VAD',
                         style: TextStyle(
                           color: Colors.white,
                           fontSize: 20,
@@ -282,7 +270,6 @@ class _MyAppState extends State<MyApp> {
                       ),
                     )),
               ),
-
             ],
           ),
         ),
