@@ -5,9 +5,9 @@ class AudioEventType {
 }
 
 enum VADEventType {
-  FIRST,
-  CONTINUE,
-  LAST
+  firstFrame,
+  continuousFrame,
+  lastFrame
 }
 
 class VADEvent {
@@ -21,13 +21,10 @@ class VADEvent {
     final type = json['type'];
     final eventType = VADEventType.values[type];
 
-    // If the event type is LAST, we separate into two events: CONTINUE and LAST
-    // The last CONTINUE event will contain the last audio segment
-    // The LAST event only contains the flag
     return VADEvent(
-      eventType == VADEventType.LAST ? VADEventType.CONTINUE : eventType,
+      eventType,
       List<int>.from(json['audioSegment']),
-      eventType == VADEventType.LAST,
+      eventType == VADEventType.lastFrame,
     );
   }
 }

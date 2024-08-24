@@ -88,6 +88,12 @@ class SmartRobotPlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHa
 
     companion object {
         private lateinit var assetManager: AssetManager
+        private const val TAG = "SmartRobotPlugin"
+        private const val VAD_SAMPLE_RATE = 16000
+        private const val VAD_WINDOW_SIZE = 16000
+        private const val VAD_WINDOW_STEP = 4800
+        private const val TRIGGER_WORD_SAMPLE_RATE = 8000
+        private const val VAD_TIMEOUT_IN_MILLISECONDS = 10000
 
         @JvmStatic
         fun registerWith(registrar: PluginRegistry.Registrar) {
@@ -138,7 +144,9 @@ class SmartRobotPlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHa
             }
 
             Constants.startVAD -> {
-                startVAD()
+                call.argument<Int>("timeoutInMilliseconds")?.let {
+                    startVAD(it)
+                } ?: startVAD()
                 result.success("success")
             }
 
@@ -151,8 +159,6 @@ class SmartRobotPlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHa
             }
 
             Constants.stopVAD -> {
-                println("Stop record")
-                stopTriggerWord()
                 stopVAD()
                 result.success("success")
             }
@@ -355,7 +361,7 @@ class SmartRobotPlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHa
 
         if (triggerWordAudioRecord?.state == AudioRecord.STATE_INITIALIZED) {
             GlobalScope.launch(Dispatchers.IO) {
-                print("Start trigger word")
+                Log.d(TAG, "Start trigger word")
                 triggerWordAudioRecord?.startRecording()
                 val buffer = FloatArray(8000)
                 while (triggerWordAudioRecord?.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
@@ -367,16 +373,21 @@ class SmartRobotPlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHa
                             if (lastBCScore > bcLowThreshold) {
                                 bcThreshold = bcLowThreshold
                             }
-                            triggerWord.bcModelDetect(buffer)?.apply {
-                                print("BCScore: $score")
+                            val bcScore = triggerWord.bcModelDetect(buffer)?.apply {
+                                Log.d(TAG, "BCScore: $score")
 
                                 if (score > bcThreshold) {
+
                                     kotlinx.coroutines.withContext(Dispatchers.Main) {
                                         eventSink?.success(AudioEvent.triggerWordDetected())
                                     }
                                 }
                             }
 
+//                            lastBCScore = bcScore?.score ?: 0f
+//                            if (lastBCScore < bcLowThreshold) {
+//                                bcThreshold = bcHighThreshold
+//                            }
 
                             // Start conv model detect
 //                            if (bcScore != null && bcScore.score > bcThreshold) {
@@ -440,11 +451,10 @@ class SmartRobotPlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHa
         return byteArray
     }
 
-    private fun startVAD() {
-        var audio: ArrayList<Float> = arrayListOf()
+    private fun startVAD(timeoutInMilliseconds: Int = VAD_TIMEOUT_IN_MILLISECONDS) {
 
         val bufferSize = AudioRecord.getMinBufferSize(
-            16000,
+            VAD_SAMPLE_RATE,
             AudioFormat.CHANNEL_IN_MONO,
             AudioFormat.ENCODING_PCM_FLOAT
         )
@@ -457,7 +467,7 @@ class SmartRobotPlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHa
         }
         vadAudioRecord = AudioRecord(
             MediaRecorder.AudioSource.MIC,
-            16000,
+            VAD_SAMPLE_RATE,
             AudioFormat.CHANNEL_IN_MONO,
             AudioFormat.ENCODING_PCM_FLOAT,
             bufferSize
@@ -466,51 +476,67 @@ class SmartRobotPlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHa
 
         if (vadAudioRecord?.state == AudioRecord.STATE_INITIALIZED) {
             GlobalScope.launch(Dispatchers.IO) {
+                var audioBuffer: ArrayList<Float> = arrayListOf()
                 vadAudioRecord?.startRecording()
-                val buffer = FloatArray(4800)
-                var isFirstSegment = true
+                val tempBuffer = FloatArray(VAD_WINDOW_STEP)
+                var noSpeechYet = true
+                var silenceTimeInFrames = 0
 
                 while (vadAudioRecord?.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
                     val bytesRead: Int =
-                        vadAudioRecord?.read(buffer, 0, buffer.size, AudioRecord.READ_BLOCKING) ?: 0
+                        vadAudioRecord?.read(tempBuffer, 0, tempBuffer.size, AudioRecord.READ_BLOCKING) ?: 0
 
                     if (bytesRead > 0 && !isSpeaking) {
-                        audio.addAll(buffer.toList())
-                        if (audio.size >= 16000) {
-                            val newAudio = audio.subList(0, 16000).toFloatArray()
-                            audio = ArrayList(audio.subList(4800, audio.size))
+                        audioBuffer.addAll(tempBuffer.toList())
+                        if (audioBuffer.size >= VAD_WINDOW_SIZE) {
+                            val audioWindow = audioBuffer.subList(0, VAD_WINDOW_SIZE).toFloatArray()
+                            audioBuffer = ArrayList(audioBuffer.subList(VAD_WINDOW_STEP, audioBuffer.size))
 
-                            print("Running VAD model")
-
-                            vad.detectVAD(newAudio)?.apply {
-                                val pcm16Audio = pcmFloatTo16(newAudio)
-                                print("VAD Score: $score")
+                            vad.detectVAD(audioWindow)?.apply {
+                                val pcm16Audio = pcmFloatTo16(audioWindow)
+                                Log.d(TAG, "VAD Score: $score")
                                 val recordedSegment = when {
-                                    isSpeech && isFirstSegment -> {
-                                        isFirstSegment = false
+                                    isSpeech && noSpeechYet -> {
+                                        noSpeechYet = false
+                                        silenceTimeInFrames = 0
                                         RecordedSegment(shortArrayToByteArray(pcm16Audio), RecordedSegment.Type.FIRST)
                                     }
 
-                                    isSpeech && !isFirstSegment ->
+                                    isSpeech && !noSpeechYet ->
                                         RecordedSegment(
-                                            shortArrayToByteArray(pcm16Audio.toList().subList(11200, 16000).toShortArray()),
+                                            shortArrayToByteArray(pcm16Audio.toList().subList(
+                                                VAD_WINDOW_SIZE - VAD_WINDOW_STEP, VAD_WINDOW_SIZE).toShortArray()),
                                             RecordedSegment.Type.CONTINUE
                                         )
 
-                                    !isSpeech && !isFirstSegment -> {
-                                        isFirstSegment = true
+                                    !isSpeech && !noSpeechYet -> {
+                                        noSpeechYet = true
+                                        silenceTimeInFrames += VAD_WINDOW_SIZE
                                         RecordedSegment(
-                                            shortArrayToByteArray(pcm16Audio.toList().subList(11200, 16000).toShortArray()),
+                                            byteArrayOf(),
                                             RecordedSegment.Type.LAST
                                         )
                                     }
 
-                                    else -> null
+                                    // not speech and no speech yet
+                                    else -> {
+                                        silenceTimeInFrames += VAD_WINDOW_STEP
+                                        null
+                                    }
                                 }
 
                                 recordedSegment?.let { segment ->
                                     GlobalScope.launch(Dispatchers.Main) {
                                         eventSink?.success(AudioEvent.vadRecording(segment))
+                                    }
+                                } ?: run {
+                                    val silenceTimeInMilliseconds = (silenceTimeInFrames.toFloat() / VAD_SAMPLE_RATE * 1000)
+                                    Log.d(TAG, "Silence time: %.2f".format(silenceTimeInMilliseconds))
+                                    if (silenceTimeInMilliseconds >= timeoutInMilliseconds) {
+                                        GlobalScope.launch(Dispatchers.Main) {
+                                            silenceTimeInFrames = 0
+                                            eventSink?.success(AudioEvent.vadTimeout())
+                                        }
                                     }
                                 }
 
@@ -548,8 +574,7 @@ class SmartRobotPlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHa
     }
 
     private fun stopTriggerWord() {
-        println("Trigger word state: ")
-        println(triggerWordAudioRecord?.state)
+        Log.d(TAG, "Stop trigger word, current state: ${triggerWordAudioRecord?.state}")
         if (triggerWordAudioRecord?.state == AudioRecord.RECORDSTATE_RECORDING
             || triggerWordAudioRecord?.state == AudioRecord.READ_NON_BLOCKING
             || triggerWordAudioRecord?.state == AudioRecord.STATE_INITIALIZED) {
@@ -561,8 +586,7 @@ class SmartRobotPlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHa
     }
 
     private fun stopVAD() {
-        println("Stopping VAD Recording: ")
-        println(vadAudioRecord?.state)
+        Log.d(TAG, "Stopping VAD Recording: ${vadAudioRecord?.state}")
         if (vadAudioRecord?.state == AudioRecord.RECORDSTATE_RECORDING
             || vadAudioRecord?.state == AudioRecord.READ_NON_BLOCKING
             || vadAudioRecord?.state == AudioRecord.STATE_INITIALIZED) {

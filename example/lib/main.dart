@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:developer';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'dart:async';
@@ -52,11 +53,12 @@ class _MyAppState extends State<MyApp> implements AudioEventListener {
   @override
   void onTriggerWordDetected() {
     _showAlertDialog(context, "Trigger word detected!", "");
-    _smartRobotPlugin.startVAD();
+    _smartRobotPlugin.stopTriggerWord();
+    _smartRobotPlugin.startVAD(30000);
   }
 
   @override
-  void onVADRecording(VADEvent event) {
+  void onSpeaking(VADEvent event) {
     if (channel != null) {
       final data = base64.encode(event.audioSegment);
 
@@ -70,7 +72,7 @@ class _MyAppState extends State<MyApp> implements AudioEventListener {
   }
 
   @override
-  void onVADEnd() {
+  void onSpeechEnd() {
     if (channel != null) {
       channel!.sink.add(jsonEncode({
         "data": "",
@@ -80,8 +82,10 @@ class _MyAppState extends State<MyApp> implements AudioEventListener {
   }
 
   @override
-  void onVADTimeout() {
-    print("VAD Timeout");
+  void onSilenceTimeout() {
+    _showAlertDialog(context, "VAD timeout!", "");
+    _smartRobotPlugin.stopVAD();
+    _smartRobotPlugin.startTriggerWord();
   }
 
   @override
@@ -176,7 +180,7 @@ class _MyAppState extends State<MyApp> implements AudioEventListener {
             children: [
               Text('Running on: $_platformVersion\n'),
               InkWell(
-                onTap: () => _smartRobotPlugin.startRecord(),
+                onTap: () => _smartRobotPlugin.startTriggerWord(),
                 child: Container(
                     height: 50,
                     width: 200,

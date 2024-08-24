@@ -61,7 +61,7 @@ class MethodChannelSmartRobot extends SmartRobotPlatform {
   }
 
   @override
-  Future<void> startRecord() async {
+  Future<void> startTriggerWord() async {
     await methodChannel.invokeMethod<void>('startRecord');
   }
 
@@ -71,8 +71,10 @@ class MethodChannelSmartRobot extends SmartRobotPlatform {
   }
 
   @override
-  Future<void> startVAD() async {
-    await methodChannel.invokeMethod<void>('startVAD');
+  Future<void> startVAD([int? timeoutInMilliseconds]) async {
+    await methodChannel.invokeMethod<void>('startVAD', {
+      'timeoutInMilliseconds': timeoutInMilliseconds,
+    } );
   }
 
   @override

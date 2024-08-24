@@ -28,16 +28,16 @@ class SmartRobot {
           case AudioEventType.vadRecording:
             final vadEvent = VADEvent.fromJson(event['data']);
             for (final listener in _audioEventListeners) {
-              listener.onVADRecording(vadEvent);
-
               if (vadEvent.isLast) {
-                listener.onVADEnd();
+                listener.onSpeechEnd();
+              } else {
+                listener.onSpeaking(vadEvent);
               }
             }
             break;
           case AudioEventType.vadTimeout:
             for (final listener in _audioEventListeners) {
-              listener.onVADTimeout();
+              listener.onSilenceTimeout();
             }
             break;
         }
@@ -73,8 +73,8 @@ class SmartRobot {
     return SmartRobotPlatform.instance.detectVAD(audioPath);
   }
 
-  Future<void> startRecord() {
-    return SmartRobotPlatform.instance.startRecord();
+  Future<void> startTriggerWord() {
+    return SmartRobotPlatform.instance.startTriggerWord();
   }
 
   Future<void> stopTriggerWord() {
@@ -85,8 +85,8 @@ class SmartRobot {
     return SmartRobotPlatform.instance.stopVAD();
   }
 
-  Future<void> startVAD() {
-    return SmartRobotPlatform.instance.startVAD();
+  Future<void> startVAD([int? timeoutInMilliseconds]) {
+    return SmartRobotPlatform.instance.startVAD(timeoutInMilliseconds);
   }
 
   Future<void> playWaveformAudio(Int16List audioData) {

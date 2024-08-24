@@ -50,7 +50,7 @@ class MockSmartRobotPlatform
   }
 
   @override
-  Future<void> startRecord() {
+  Future<void> startTriggerWord() {
     // TODO: implement startRecord
     throw UnimplementedError();
   }
@@ -70,6 +70,12 @@ class MockSmartRobotPlatform
   @override
   Future<void> playWaveformAudio(Int16List audioData) {
     // TODO: implement playWaveformAudio
+    throw UnimplementedError();
+  }
+
+  @override
+  Future<void> startVAD([int? timeoutInMilliseconds]) {
+    // TODO: implement startVAD
     throw UnimplementedError();
   }
 }
