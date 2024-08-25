@@ -122,6 +122,7 @@ class _MyAppState extends State<MyApp> implements AudioEventListener {
       // listen to websocket
       channel?.stream.listen((event) {
         print("Event from websocket: $event");
+        // display speech-to-text result here
       }, onError: (error) {
         print("Error from websocket: $error");
       }, onDone: () {
@@ -166,6 +167,13 @@ class _MyAppState extends State<MyApp> implements AudioEventListener {
     setState(() {
       _platformVersion = platformVersion;
     });
+  }
+
+  @override
+  void dispose() {
+    super.dispose();
+    _smartRobotPlugin.removeAudioEventListener(this);
+    channel?.sink.close();
   }
 
   @override
