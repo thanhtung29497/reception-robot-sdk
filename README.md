@@ -5,7 +5,8 @@ A Flutter plugin for the smart robot project. This plugin is used to detect the 
 ### Integration Guide
 
 1. Add the plugin to your project folder
-Clone the smart_robot plugin from this repository and add it to your project folder as git submodule.
+
+    Clone the smart_robot plugin from this repository and add it to your project folder as git submodule.
     ```bash
     git submodule add https://github.com/thanhtung29497/reception-robot-sdk.git
     git submodule update --init --recursive
