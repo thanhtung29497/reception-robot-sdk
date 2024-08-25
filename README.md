@@ -6,7 +6,7 @@ A Flutter plugin for the smart robot project. This plugin is used to detect the 
 
 1. Add the plugin to your project folder
 
-    Clone the smart_robot plugin from this repository and add it to your project folder as git submodule.
+    Clone the `smart_robot` plugin from this repository and add it to your project folder as git submodule.
     ```bash
     git submodule add https://github.com/thanhtung29497/reception-robot-sdk.git
     git submodule update --init --recursive
@@ -43,57 +43,58 @@ A Flutter plugin for the smart robot project. This plugin is used to detect the 
     }
     ```
 
-4. Use the plugin
-    - Start the trigger word detection
-        ```dart
-        await _smartRobotPlugin.startTriggerWord()
-        ```
+4. Use the plugin 
+
+    Start the trigger word detection
+    ```dart
+    await _smartRobotPlugin.startTriggerWord()
+    ```
 
 5. Listen to the AudioEvent
-    - Implement the AudioEventListener interface
-    - Add the AudioEventListener to the plugin
-    - Override the methods of the AudioEventListener interface
-    - Remember to remove the AudioEventListener when the widget is disposed
+- Implement the `AudioEventListener` interface
+- Add the `AudioEventListener`-object to the plugin
+- Override the methods of the `AudioEventListener` interface
+- Remember to remove the `AudioEventListener` when the widget is disposed
 
-    ```dart
-    class YourClass implements AudioEventListener {
-      void initState() {
-        super.initState();
-        _smartRobotPlugin.addAudioEventListener(this);
-      }
-    
-      @override
-      void onTriggerWordDetected() {
-        print('Trigger word detected');
-        _smartRobotPlugin.startVAD();
-      }
-      
-      @override
-      void onSpeaking(VADEvent event) {
-        // Send the audio data to the server
-      }
-      
-      @override
-      void onSpeechEnd() {
-        print('Speech end');
-        // Send the ending signal to the server
-      }
-      
-      @override
-      void onSilenceTimeout() {
-        print('Silence timeout');
-        _smartRobotPlugin.stopVAD();
-        _smartRobotPlugin.startTriggerWord();
-      }
-      
-      @override
-      void dispose() {
-        super.dispose();
-        _smartRobotPlugin.removeAudioEventListener(this);
-        channel?.sink.close();
-      }
+  ```dart
+  class YourClass implements AudioEventListener {
+    void initState() {
+      super.initState();
+      _smartRobotPlugin.addAudioEventListener(this);
     }
-    ```
+    
+    @override
+    void onTriggerWordDetected() {
+      print('Trigger word detected');
+      _smartRobotPlugin.startVAD();
+    }
+      
+    @override
+    void onSpeaking(VADEvent event) {
+      // Send the audio data to the server
+    }
+      
+    @override
+    void onSpeechEnd() {
+      print('Speech end');
+      // Send the ending signal to the server
+    }
+      
+    @override
+    void onSilenceTimeout() {
+      print('Silence timeout');
+      _smartRobotPlugin.stopVAD();
+      _smartRobotPlugin.startTriggerWord();
+    }
+      
+    @override
+    void dispose() {
+      super.dispose();
+      _smartRobotPlugin.removeAudioEventListener(this);
+      channel?.sink.close();
+    }
+  }
+  ```
 
 ### Example App
 - The example app is located in the `example` folder. All example-related code is in the `example/lib/main.dart` file.
