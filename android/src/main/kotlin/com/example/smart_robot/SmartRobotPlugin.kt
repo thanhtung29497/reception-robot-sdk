@@ -16,6 +16,9 @@ import android.util.Log
 import androidx.core.app.ActivityCompat
 import com.example.smart_robot.event.AudioEvent
 import com.example.smart_robot.event.RecordedSegment
+import com.example.smart_robot.speech.TriggerWordDetectionFlow
+import com.example.smart_robot.speech.TriggerWordError
+import com.example.smart_robot.speech.TriggerWordEventListener
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
@@ -49,6 +52,8 @@ class SmartRobotPlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHa
     private lateinit var faceDetect: FaceDetect
 
     private lateinit var triggerWord: TriggerWord
+
+    private lateinit var triggerWordDetectionFlow: TriggerWordDetectionFlow
 
     private lateinit var vad: VAD
 
@@ -84,11 +89,14 @@ class SmartRobotPlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHa
         )
         context = flutterPluginBinding.applicationContext
         assetManager = flutterPluginBinding.applicationContext.assets
+
+        triggerWordDetectionFlow = TriggerWordDetectionFlow.getInstance(context, assetManager)
     }
 
     companion object {
+        @JvmField val TAG: String = SmartRobotPlugin::class.java.simpleName
+
         private lateinit var assetManager: AssetManager
-        private const val TAG = "SmartRobotPlugin"
         private const val VAD_SAMPLE_RATE = 16000
         private const val VAD_WINDOW_SIZE = 16000
         private const val VAD_WINDOW_STEP = 4800
@@ -124,7 +132,8 @@ class SmartRobotPlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHa
             }
 
             Constants.initTriggerWord -> {
-                initTriggerWordModel()
+//                initTriggerWordModel()
+                triggerWordDetectionFlow.initModel()
                 result.success("success")
             }
 
@@ -151,11 +160,27 @@ class SmartRobotPlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHa
             }
 
             Constants.startRecord -> {
-                startTriggerWord()
+//                startTriggerWord()
+                triggerWordDetectionFlow.startListening(object: TriggerWordEventListener() {
+                    override fun onTriggerWordDetected() {
+                        GlobalScope.launch(Dispatchers.Main) {
+                            eventSink?.success(AudioEvent.triggerWordDetected())
+                        }
+                    }
+
+                    override fun onError(error: TriggerWordError) {
+                        TODO("Not yet implemented")
+                    }
+
+                    override fun onEnd() {
+                        Log.d(TAG, "Trigger word flow ended")
+                    }
+
+                })
             }
 
             Constants.stopTriggerWord -> {
-                stopTriggerWord()
+                triggerWordDetectionFlow.stop()
             }
 
             Constants.stopVAD -> {

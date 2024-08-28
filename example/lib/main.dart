@@ -8,6 +8,7 @@ import 'package:record/record.dart';
 import 'package:smart_robot/audio_event.dart';
 import 'package:smart_robot/audio_event_listener.dart';
 import 'package:smart_robot/smart_robot.dart';
+import 'package:fluttertoast/fluttertoast.dart';
 import 'package:web_socket_channel/io.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
@@ -52,9 +53,16 @@ class _MyAppState extends State<MyApp> implements AudioEventListener {
 
   @override
   void onTriggerWordDetected() {
-    _showAlertDialog(context, "Trigger word detected!", "");
-    _smartRobotPlugin.stopTriggerWord();
-    _smartRobotPlugin.startVAD(30000);
+    Fluttertoast.showToast(
+        msg: "Trigger word detected",
+        toastLength: Toast.LENGTH_LONG,
+        gravity: ToastGravity.TOP,
+        fontSize: 24.0,
+        backgroundColor: const Color(0xCCFFFFFF),
+        textColor: Colors.black,
+    );
+    // _smartRobotPlugin.stopTriggerWord();
+    // _smartRobotPlugin.startVAD(30000);
   }
 
   @override
@@ -83,7 +91,7 @@ class _MyAppState extends State<MyApp> implements AudioEventListener {
 
   @override
   void onSilenceTimeout() {
-    _showAlertDialog(context, "VAD timeout!", "");
+    Fluttertoast.showToast(msg: "VAD Timeout");
     _smartRobotPlugin.stopVAD();
     _smartRobotPlugin.startTriggerWord();
   }
