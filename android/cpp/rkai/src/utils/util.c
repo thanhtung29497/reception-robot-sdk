@@ -475,6 +475,7 @@ rkai_ret_t load_config_file(const char *file_name, rkai_melspectrogram_config_t 
 
     char *token;
     token = strtok(line, "\n");
+    strcpy(config->model_config_name, file_name);
     while (token != NULL) {
         LOG_INFO("Read data from file --------- %s \n", token);
         // Check if start with #, it is comment so skip
