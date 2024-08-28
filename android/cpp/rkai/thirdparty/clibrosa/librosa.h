@@ -275,16 +275,6 @@ namespace librosa {
             }
             //if preprocess, need to normalize follow nn.functional.normalize(x, p=2, dim=1)
             if (mel_norm) {
-                // for (int i = 0; i < mel_vector.size(); ++i) np.float32np.float32{
-                //   float sum = 0;
-                //   for (int j = 0; j < mel_vector[i].size(); ++j) {
-                //     sum += mel_vector[i][j] * mel_vector[i][j];
-                //   }
-                //   sum = std::sqrt(sum);
-                //   for (int j = 0; j < mel_vector[i].size(); ++j) {
-                //     mel_vector[i][j] = mel_vector[i][j] / sum;
-                //   }
-                // }
                 float sum_per_channel[mel_vector[0].size()];
                 for (int i = 0; i < mel_vector[0].size(); ++i) {
                     sum_per_channel[i] = 0;
