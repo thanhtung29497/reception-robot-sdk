@@ -1,30 +1,20 @@
 package com.example.smart_robot.speech
 
-import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
-import android.content.pm.PackageManager
 import android.content.res.AssetManager
 import android.media.AudioFormat
-import android.media.AudioRecord
-import android.media.MediaRecorder
-import android.media.AudioManager
 import android.util.Log
-import androidx.core.app.ActivityCompat
+import com.example.smart_robot.AudioWriter
 import com.example.smart_robot.TriggerWord
-import kotlinx.coroutines.DelicateCoroutinesApi
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.GlobalScope
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import java.util.concurrent.atomic.AtomicBoolean
+import com.example.smart_robot.io.audio.AudioRecordingForAIModel
 import kotlin.math.abs
 import kotlin.math.log10
 
 class TriggerWordDetectionFlow private constructor(
     private val context: Context,
     private val assetManager: AssetManager,
-    private val bcThreshold: Float = 0.8f,
+    private val bcThreshold: Float = 0.6f,
     private val convThreshold: Float = 0.6f
 ) {
 
@@ -32,32 +22,35 @@ class TriggerWordDetectionFlow private constructor(
 
     private val listeners = mutableListOf<TriggerWordEventListener>()
 
-    private val bufferSize: Int by lazy {
-        AudioRecord.getMinBufferSize(
+    private val audioRecorder: AudioRecordingForAIModel by lazy {
+        AudioRecordingForAIModel(
+            context,
             SAMPLE_RATE,
             SAMPLE_CHANNELS,
-            SAMPLE_ENCODING
-        )
-    }
-
-    private var audioRecord: AudioRecord? = null
-    private var isRecording = AtomicBoolean(false)
-
-
-    private suspend fun recordingCoroutine() = withContext(Dispatchers.Default) {
-        audioRecord?.apply {
-            val buffer = FloatArray(SAMPLE_DURATION * SAMPLE_RATE)
-            while (isRecording.get()) {
-                read(buffer, 0, buffer.size, AudioRecord.READ_BLOCKING)
+            SAMPLE_ENCODING,
+            SAMPLE_WINDOW_SIZE,
+            SAMPLE_WINDOW_STRIDE
+        ) { buffer ->
+            // Called every time the desired buffer size is filled
+            try {
+                // run the trigger word detection model flow
                 isTriggerWord(buffer)?.let {
+                    // Clear the buffer to avoid multiple trigger word detection
+                    audioRecorder.clearBuffer()
                     Log.d(TAG, "Trigger word detected")
                     listeners.forEach { listener ->
                         listener.onTriggerWordDetected()
                     }
                 }
+            } catch (e: Exception) {
+                listeners.forEach { listener ->
+                    listener.onError(TriggerWordError.ErrorDetectModel)
+                }
             }
         }
     }
+
+
 
     /**
      * Initialize the trigger word detection model
@@ -86,13 +79,20 @@ class TriggerWordDetectionFlow private constructor(
      * run the trigger word detection model flow
      */
     private fun isTriggerWord(buffer: FloatArray): TriggerWord.Obj? {
+        // Calculate the dB of the buffer, if the dB is less than the silence threshold, not process the buffer
         val db = 20 * log10(buffer.maxOf { abs(it) })
-        if (abs(db) <= 0) {
+        if (db < SILENCE_THRESHOLD) {
             return null
         }
 
         detectBCModel(buffer)?.also {bcResult ->
             Log.d(TAG, "BC score: ${bcResult.score}")
+//            if (bcResult.score > 0.2) {
+//                val audioWriter = AudioWriter()
+//                val filePath = context.filesDir.absolutePath + "/" + System.currentTimeMillis() + "_" + bcResult.score + ".wav"
+//                Log.d(TAG, "Writing audio to $filePath")
+//                audioWriter.writeWavFile(filePath, SAMPLE_RATE, buffer)
+//            }
             if (bcResult.score > bcThreshold) {
                 detectConvModel(buffer)?.also {convResult ->
                     Log.d(TAG, "Conv score: ${convResult.score}")
@@ -106,22 +106,6 @@ class TriggerWordDetectionFlow private constructor(
         return null
     }
 
-    /**
-     * Check if the app has the required permission
-     * @return true if the app has the required permission, null otherwise
-     */
-    private fun checkPermission(): Boolean? {
-        if (ActivityCompat.checkSelfPermission(
-                context,
-                Manifest.permission.RECORD_AUDIO
-            ) != PackageManager.PERMISSION_GRANTED
-        ) {
-            Log.w(TAG, "Permission not granted")
-            return null
-        }
-
-        return true
-    }
 
     /**
      * Start listening for the trigger word
@@ -130,8 +114,14 @@ class TriggerWordDetectionFlow private constructor(
      */
 
     fun startListening(listener: TriggerWordEventListener) {
-        if (isRecording.compareAndSet(false, true)) {
-            startRecording()
+        if (!audioRecorder.isRecording) {
+            try {
+                audioRecorder.startRecording()
+            } catch (e: SecurityException) {
+                listener.onError(TriggerWordError.ErrorAudioPermission)
+            } catch (e: Exception) {
+                listener.onError(TriggerWordError.ErrorAudioRecord)
+            }
         } else {
             Log.w(TAG, "Trigger word flow are already recording")
         }
@@ -140,67 +130,28 @@ class TriggerWordDetectionFlow private constructor(
     }
 
     fun stop() {
-        if (isRecording.compareAndSet(true, false)) {
-            stopRecording()
+        if (audioRecorder.isRecording) {
+            audioRecorder.stopRecording()
+            listeners.forEach { listener ->
+                listener.onEnd()
+            }
+
+            listeners.clear()
         } else {
             Log.w(TAG, "Trigger word flow are not recording")
         }
     }
 
-    @OptIn(DelicateCoroutinesApi::class)
-    private fun startRecording() {
-        checkPermission() ?: run {
-            listeners.forEach { listener ->
-                listener.onError(TriggerWordError.ErrorAudioPermission)
-            }
-
-            return@startRecording
-        }
-
-        try {
-            val audioManager: AudioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-            Log.d(TAG, audioManager.getDevices(AudioManager.GET_DEVICES_INPUTS).toString())
-
-            audioRecord = AudioRecord(
-                MediaRecorder.AudioSource.MIC,
-                SAMPLE_RATE,
-                SAMPLE_CHANNELS,
-                SAMPLE_ENCODING,
-                bufferSize
-            ).apply {
-                GlobalScope.launch(Dispatchers.Default) {
-                    startRecording()
-                    recordingCoroutine()
-                }
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to start recording", e)
-            isRecording.set(false)
-            listeners.forEach { listener ->
-                listener.onError(TriggerWordError.ErrorAudioRecord)
-            }
-        }
-    }
-
-    private fun stopRecording() {
-        audioRecord?.stop()
-        audioRecord?.release()
-        audioRecord = null
-        isRecording.set(false)
-        listeners.forEach { listener ->
-            listener.onEnd()
-        }
-
-        listeners.clear()
-    }
-
     companion object {
         @JvmField val TAG: String = TriggerWordDetectionFlow::class.java.simpleName
-        const val SAMPLE_RATE = 8000
-        const val SAMPLE_DURATION = 1
-        const val SAMPLE_SIZE = 2
+        const val SAMPLE_RATE = 8000 // Hz
+        private const val WINDOW_SIZE = 1.0 // seconds
+        const val SAMPLE_WINDOW_SIZE = (WINDOW_SIZE * SAMPLE_RATE).toInt()
+        private const val WINDOW_STRIDE = 0.3 // seconds
+        const val SAMPLE_WINDOW_STRIDE = (WINDOW_STRIDE * SAMPLE_RATE).toInt()
         const val SAMPLE_CHANNELS = AudioFormat.CHANNEL_IN_MONO
         const val SAMPLE_ENCODING = AudioFormat.ENCODING_PCM_FLOAT
+        const val SILENCE_THRESHOLD = -25.0 // dB
 
         @SuppressLint("StaticFieldLeak")
         private var instance : TriggerWordDetectionFlow? = null
