@@ -5,7 +5,6 @@ import android.content.Context
 import android.content.res.AssetManager
 import android.media.AudioFormat
 import android.util.Log
-import com.example.smart_robot.AudioWriter
 import com.example.smart_robot.TriggerWord
 import com.example.smart_robot.io.audio.AudioRecordingForAIModel
 import kotlin.math.abs
@@ -23,28 +22,33 @@ class TriggerWordDetectionFlow private constructor(
     private val listeners = mutableListOf<TriggerWordEventListener>()
 
     private val audioRecorder: AudioRecordingForAIModel by lazy {
-        AudioRecordingForAIModel(
+        object : AudioRecordingForAIModel(
             context,
             SAMPLE_RATE,
             SAMPLE_CHANNELS,
             SAMPLE_ENCODING,
             SAMPLE_WINDOW_SIZE,
             SAMPLE_WINDOW_STRIDE
-        ) { buffer ->
-            // Called every time the desired buffer size is filled
-            try {
-                // run the trigger word detection model flow
-                isTriggerWord(buffer)?.let {
-                    // Clear the buffer to avoid multiple trigger word detection
-                    audioRecorder.clearBuffer()
-                    Log.d(TAG, "Trigger word detected")
-                    listeners.forEach { listener ->
-                        listener.onTriggerWordDetected()
+        ) {
+            override fun onBeforeRecording() {
+                clearBuffer()
+            }
+
+            override fun onBufferFilled(buffer: FloatArray) {
+                try {
+                    // run the trigger word detection model flow
+                    isTriggerWord(buffer)?.let {
+                        // Clear the buffer to avoid multiple trigger word detection
+                        clearBuffer()
+                        Log.d(TAG, "Trigger word detected")
+                        listeners.forEach { listener ->
+                            listener.onTriggerWordDetected()
+                        }
                     }
-                }
-            } catch (e: Exception) {
-                listeners.forEach { listener ->
-                    listener.onError(TriggerWordError.ErrorDetectModel)
+                } catch (e: Exception) {
+                    listeners.forEach { listener ->
+                        listener.onError(TriggerWordError.ErrorRunModel)
+                    }
                 }
             }
         }
@@ -57,8 +61,15 @@ class TriggerWordDetectionFlow private constructor(
      */
     fun initModel() {
         // Load the model
-        triggerWord = TriggerWord()
-        triggerWord.initModel(assetManager)
+        try {
+            triggerWord = TriggerWord().apply {
+                initModel(assetManager)
+            }
+        } catch (e: Exception) {
+            listeners.forEach { listener ->
+                listener.onError(TriggerWordError.ErrorInitModel)
+            }
+        }
     }
 
     /**
