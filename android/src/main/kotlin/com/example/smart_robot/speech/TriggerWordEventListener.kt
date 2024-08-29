@@ -10,5 +10,5 @@ enum class TriggerWordError {
     ErrorAudioRecord,
     ErrorAudioPermission,
     ErrorInitModel,
-    ErrorDetectModel
+    ErrorRunModel
 }

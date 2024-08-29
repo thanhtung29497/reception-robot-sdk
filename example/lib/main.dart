@@ -93,7 +93,7 @@ class _MyAppState extends State<MyApp> implements AudioEventListener {
   void onSilenceTimeout() {
     Fluttertoast.showToast(msg: "VAD Timeout");
     _smartRobotPlugin.stopVAD();
-    _smartRobotPlugin.startTriggerWord();
+    // _smartRobotPlugin.startTriggerWord();
   }
 
   @override
@@ -243,7 +243,7 @@ class _MyAppState extends State<MyApp> implements AudioEventListener {
               ),
               InkWell(
                 onTap: () async {
-                  await _smartRobotPlugin.startVAD();
+                  await _smartRobotPlugin.startVAD(30000);
                 },
                 child: Container(
                     height: 50,

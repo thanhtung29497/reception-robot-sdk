@@ -19,6 +19,10 @@ import com.example.smart_robot.event.RecordedSegment
 import com.example.smart_robot.speech.TriggerWordDetectionFlow
 import com.example.smart_robot.speech.TriggerWordError
 import com.example.smart_robot.speech.TriggerWordEventListener
+import com.example.smart_robot.speech.VADError
+import com.example.smart_robot.speech.VoiceActivityDetectionFlow
+import com.example.smart_robot.speech.VoiceActivityEventListener
+import com.example.smart_robot.utils.AudioUtils
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
@@ -31,8 +35,6 @@ import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
 import org.json.JSONStringer
 import java.io.File
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 import kotlin.math.abs
 import kotlin.math.log10
 
@@ -54,6 +56,8 @@ class SmartRobotPlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHa
     private lateinit var triggerWord: TriggerWord
 
     private lateinit var triggerWordDetectionFlow: TriggerWordDetectionFlow
+
+    private lateinit var voiceActivityDetectionFlow: VoiceActivityDetectionFlow
 
     private lateinit var vad: VAD
 
@@ -91,6 +95,7 @@ class SmartRobotPlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHa
         assetManager = flutterPluginBinding.applicationContext.assets
 
         triggerWordDetectionFlow = TriggerWordDetectionFlow.getInstance(context, assetManager)
+        voiceActivityDetectionFlow = VoiceActivityDetectionFlow.getInstance(context, assetManager)
     }
 
     companion object {
@@ -143,7 +148,8 @@ class SmartRobotPlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHa
             }
 
             Constants.initVAD -> {
-                initVADModel()
+//                initVADModel()
+                voiceActivityDetectionFlow.initModel()
                 result.success("success")
             }
 
@@ -153,9 +159,62 @@ class SmartRobotPlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHa
             }
 
             Constants.startVAD -> {
-                call.argument<Int>("timeoutInMilliseconds")?.let {
-                    startVAD(it)
-                } ?: startVAD()
+                val timeoutInMilliseconds = call.argument<Int>("timeoutInMilliseconds")
+
+                voiceActivityDetectionFlow.startRecording(object: VoiceActivityEventListener() {
+                    override fun onFirstVADDetected(segment: FloatArray) {
+                        // Sending event to flutter are marked with @UiThread so it must be called from the main thread
+                        GlobalScope.launch(Dispatchers.Main) {
+                            eventSink?.success(
+                                AudioEvent.vadRecording(
+                                    RecordedSegment(
+                                        AudioUtils.shortArrayToByteArray(AudioUtils.pcmFloatTo16(segment)),
+                                        RecordedSegment.Type.FIRST
+                                    )
+                                )
+                            )
+                        }
+                    }
+
+                    override fun onVADDetected(segment: FloatArray) {
+                        // Sending event to flutter are marked with @UiThread so it must be called from the main thread
+                        GlobalScope.launch(Dispatchers.Main) {
+                            eventSink?.success(AudioEvent.vadRecording(
+                                RecordedSegment(
+                                    AudioUtils.shortArrayToByteArray(AudioUtils.pcmFloatTo16(segment)),
+                                    RecordedSegment.Type.CONTINUE
+                                )
+                            ))
+                        }
+                    }
+
+                    override fun onVADError(error: VADError) {
+                        Log.w(TAG, "VAD Error: $error")
+                    }
+
+                    override fun onLastVADDetected() {
+                        GlobalScope.launch(Dispatchers.Main) {
+                            eventSink?.success(AudioEvent.vadRecording(
+                                RecordedSegment(
+                                    byteArrayOf(),
+                                    RecordedSegment.Type.LAST
+                                )
+                            ))
+                        }
+                    }
+
+                    override fun onVADEnd() {
+                        Log.d(TAG, "VAD flow ended")
+                    }
+
+                    override fun onVADTimeout() {
+                        GlobalScope.launch(Dispatchers.Main) {
+                            eventSink?.success(AudioEvent.vadTimeout())
+                        }
+                    }
+
+                }, timeoutInMilliseconds)
+
                 result.success("success")
             }
 
@@ -184,7 +243,8 @@ class SmartRobotPlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHa
             }
 
             Constants.stopVAD -> {
-                stopVAD()
+//                stopVAD()
+                voiceActivityDetectionFlow.stop()
                 result.success("success")
             }
             Constants.playWaveform -> {
@@ -448,34 +508,6 @@ class SmartRobotPlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHa
         }
     }
 
-    // Convert PCM PCM 16-bit to PCM float
-    private fun pcm16toFloat(pcms: ByteArray): FloatArray {
-        val floaters = FloatArray(pcms.size)
-        for (i in pcms.indices) {
-            floaters[i] = pcms[i] / 32768.0f
-        }
-        return floaters
-    }
-
-    // Convert PCM float to PCM 16-bit, then convert to ByteArray
-    private fun pcmFloatTo16(pcms: FloatArray): ShortArray {
-        val shorts = ShortArray(pcms.size)
-        for (i in pcms.indices) {
-            shorts[i] = (pcms[i] * 32768).toInt().toShort()
-        }
-        return shorts
-    }
-
-    private fun shortArrayToByteArray(shortArray: ShortArray): ByteArray {
-        val byteArray = ByteArray(shortArray.size * 2)
-        val buffer = ByteBuffer.wrap(byteArray)
-        buffer.order(ByteOrder.LITTLE_ENDIAN)
-        for (value in shortArray) {
-            buffer.putShort(value)
-        }
-        return byteArray
-    }
-
     private fun startVAD(timeoutInMilliseconds: Int = VAD_TIMEOUT_IN_MILLISECONDS) {
 
         val bufferSize = AudioRecord.getMinBufferSize(
@@ -518,18 +550,18 @@ class SmartRobotPlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHa
                             audioBuffer = ArrayList(audioBuffer.subList(VAD_WINDOW_STEP, audioBuffer.size))
 
                             vad.detectVAD(audioWindow)?.apply {
-                                val pcm16Audio = pcmFloatTo16(audioWindow)
+                                val pcm16Audio = AudioUtils.pcmFloatTo16(audioWindow)
                                 Log.d(TAG, "VAD Score: $score")
                                 val recordedSegment = when {
                                     isSpeech && noSpeechYet -> {
                                         noSpeechYet = false
                                         silenceTimeInFrames = 0
-                                        RecordedSegment(shortArrayToByteArray(pcm16Audio), RecordedSegment.Type.FIRST)
+                                        RecordedSegment(AudioUtils.shortArrayToByteArray(pcm16Audio), RecordedSegment.Type.FIRST)
                                     }
 
                                     isSpeech && !noSpeechYet ->
                                         RecordedSegment(
-                                            shortArrayToByteArray(pcm16Audio.toList().subList(
+                                            AudioUtils.shortArrayToByteArray(pcm16Audio.toList().subList(
                                                 VAD_WINDOW_SIZE - VAD_WINDOW_STEP, VAD_WINDOW_SIZE).toShortArray()),
                                             RecordedSegment.Type.CONTINUE
                                         )

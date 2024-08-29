@@ -14,14 +14,13 @@ import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-class AudioRecordingForAIModel (
+abstract class AudioRecordingForAIModel (
     private val context: Context,
     private val sampleRate: Int = 44100,
     private val channelConfig: Int = AudioFormat.CHANNEL_IN_MONO,
     private val audioFormat: Int = AudioFormat.ENCODING_PCM_FLOAT,
     private val sampleWindowSize: Int,
     private val sampleWindowStride: Int,
-    private val process: (FloatArray) -> Unit
 ) {
 
     private val bufferSize: Int by lazy {
@@ -54,6 +53,16 @@ class AudioRecordingForAIModel (
         return true
     }
 
+    /**
+     * Called before starting the recording
+     */
+    abstract fun onBeforeRecording()
+
+    /**
+     * Called every time the desired buffer size is filled
+     */
+    abstract fun onBufferFilled(buffer: FloatArray)
+
     @OptIn(DelicateCoroutinesApi::class)
     fun startRecording() {
         checkPermission() ?: run {
@@ -84,6 +93,7 @@ class AudioRecordingForAIModel (
     private suspend fun recordingCoroutine() = withContext(Dispatchers.Default) {
         audioRecord?.apply {
             val tempBuffer = FloatArray(sampleWindowStride)
+            onBeforeRecording()
 
             while (isRecording) {
                 val byteRead = read(tempBuffer, 0, tempBuffer.size, AudioRecord.READ_BLOCKING)
@@ -94,7 +104,7 @@ class AudioRecordingForAIModel (
                         val audioWindow = audioBuffer.subList(0, sampleWindowSize).toFloatArray()
                         audioBuffer = ArrayList(audioBuffer.subList(sampleWindowStride, audioBuffer.size))
 
-                        process(audioWindow)
+                        onBufferFilled(audioWindow)
                     }
                 }
             }
@@ -106,10 +116,21 @@ class AudioRecordingForAIModel (
     }
 
     fun stopRecording() {
-        audioRecord?.stop()
-        audioRecord?.release()
-        audioRecord = null
         isRecording = false
+
+        audioRecord?.apply {
+            if (state in arrayOf(
+                    AudioRecord.RECORDSTATE_RECORDING,
+                    AudioRecord.READ_NON_BLOCKING,
+                    AudioRecord.STATE_INITIALIZED
+                )) {
+                stop()
+                release()
+            }
+        }
+
+        audioRecord = null
+
     }
 
     companion object {
