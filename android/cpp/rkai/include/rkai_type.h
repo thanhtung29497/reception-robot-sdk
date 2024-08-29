@@ -461,6 +461,7 @@ typedef struct rkai_vad_result_t {
  * @brief Trigger model config
  */
 typedef struct rkai_trigger_word_model_config_t {
+    char model_config_name[256];
     int sample_rate;
     int n_fft;
     int f_max;

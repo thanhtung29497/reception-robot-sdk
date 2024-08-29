@@ -1,6 +1,20 @@
-//
-// Created by tannn on 1/5/24.
-//
+/* ------------------------------------------------------------------
+* Copyright (C) 2020 ewan xu<ewan_xu@outlook.com>
+*
+* Licensed under the Apache License, Version 2.0 (the "License");
+* you may not use this file except in compliance with the License.
+* You may obtain a copy of the License at
+*
+*      http://www.apache.org/licenses/LICENSE-2.0
+*
+* Unless required by applicable law or agreed to in writing, software
+* distributed under the License is distributed on an "AS IS" BASIS,
+* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
+* express or implied.
+* See the License for the specific language governing permissions
+* and limitations under the License.
+* -------------------------------------------------------------------
+*/
 
 #ifndef SMARTROBOT_LIBROSA_H
 #define SMARTROBOT_LIBROSA_H
@@ -130,7 +144,7 @@ namespace librosa {
             float min_mel = hz_to_mel(fmin, htk);
             float max_mel = hz_to_mel(fmax, htk);
             Vectorf mels = Vectorf::LinSpaced(n_mels + 2, min_mel, max_mel);
-            Vectorf mel_f = mel_to_hz(mels,htk);
+            Vectorf mel_f = mel_to_hz(mels, htk);
             Vectorf fdiff = mel_f.segment(1, mel_f.size() - 1) - mel_f.segment(0, mel_f.size() - 1);
             Matrixf ramps = mel_f.replicate(n_f, 1).transpose().array() -
                             fft_freqs.replicate(n_mels + 2, 1).array();
@@ -194,22 +208,16 @@ namespace librosa {
         /// \param      center        same as librosa
         /// \param      mode          pad mode. support "reflect","symmetric","edge"
         /// \return     complex-valued matrix of short-time fourier transform coefficients.
-        static std::vector<std::vector<std::complex<float>>>
-        stft(std::vector<float>
-             &x,
-             int n_fft,
-             int win_len,
-             int n_hop,
-             const std::string &win,
-             bool center,
-             const std::string &mode
-        ) {
+        static std::vector<std::vector<std::complex<float>>> stft(std::vector<float> &x,
+                                                                  int n_fft, int win_len, int n_hop,
+                                                                  const std::string &win,
+                                                                  bool center,
+                                                                  const std::string &mode) {
             Vectorf map_x = Eigen::Map<Vectorf>(x.data(), x.size());
             Matrixcf X = internal::stft(map_x, n_fft, win_len, n_hop, win, center, mode);
-            std::vector<std::vector<std::complex<float>>> X_vector(X.rows(), std::vector<
-                    std::complex<
-                            float
-                    >>(X.cols(), 0));
+            std::vector<std::vector<std::complex<float>>> X_vector(X.rows(),
+                                                                   std::vector<std::complex<float>>(
+                                                                           X.cols(), 0));
             for (int i = 0; i < X.rows(); ++i) {
                 auto &row = X_vector[i];
                 Eigen::Map<Vectorcf>(row.data(), row.size()) = X.row(i);
@@ -231,8 +239,11 @@ namespace librosa {
         /// \param      f_max         highest frequency (in Hz)
         /// \param      htk           use HTK formula instead of Slaney
         /// \param      norm          normalize mel spectrogram
+        /// \param      mel_norm      normalize mel spectrogram follow nn.functional.normalize(x, p=2, dim=1)
+        /// \param      is_convert_transpose      convert mel spectrogram to transpose
         /// \param      log_mel       log-scale mel
         /// \return     mel spectrogram matrix
+        // TODO: Refactor melspectrogram function
         static std::vector<std::vector<float>> melspectrogram(std::vector<float> &x, int sr,
                                                               int n_fft, int win_len, int n_hop,
                                                               const std::string &win, bool center,
@@ -253,26 +264,29 @@ namespace librosa {
                 Eigen::Map<Vectorf>(row.data(), row.size()) = mel.col(i);
             }
 
+            bool is_log_mel = true ? log_mel != (double) 0 : false;
             // Log mel
-            for (int i = 0; i < mel_vector.size(); ++i) {
-                for (int j = 0; j < mel_vector[i].size(); ++j) {
-                    mel_vector[i][j] = std::log(mel_vector[i][j] + log_mel);
+            if (is_log_mel) {
+                for (int i = 0; i < mel_vector.size(); ++i) {
+                    for (int j = 0; j < mel_vector[i].size(); ++j) {
+                        mel_vector[i][j] = std::log(mel_vector[i][j] + log_mel);
+                    }
                 }
             }
-
             //if preprocess, need to normalize follow nn.functional.normalize(x, p=2, dim=1)
             if (mel_norm) {
-                float sum_per_channel[mel_vector.size()];
-                for (int i = 0; i < mel_vector.size(); ++i) {
+                float sum_per_channel[mel_vector[0].size()];
+                for (int i = 0; i < mel_vector[0].size(); ++i) {
                     sum_per_channel[i] = 0;
-                    for (int j = 0; j < mel_vector[i].size(); ++j) {
-                        sum_per_channel[i] += mel_vector[i][j] * mel_vector[i][j];
+                    for (int j = 0; j < mel_vector.size(); ++j) {
+                        sum_per_channel[i] += mel_vector[j][i] * mel_vector[j][i];
                     }
                     sum_per_channel[i] = std::sqrt(sum_per_channel[i]);
                 }
+
                 for (int i = 0; i < mel_vector.size(); ++i) {
                     for (int j = 0; j < mel_vector[i].size(); ++j) {
-                        mel_vector[i][j] /= sum_per_channel[i];
+                        mel_vector[i][j] = mel_vector[i][j] / sum_per_channel[j];
                     }
                 }
             }
