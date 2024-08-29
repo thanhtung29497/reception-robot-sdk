@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.res.AssetManager
 import android.media.AudioFormat
 import android.util.Log
+import com.example.smart_robot.AudioWriter
 import com.example.smart_robot.TriggerWord
 import com.example.smart_robot.io.audio.AudioRecordingForAIModel
 import kotlin.math.abs
@@ -98,12 +99,12 @@ class TriggerWordDetectionFlow private constructor(
 
         detectBCModel(buffer)?.also {bcResult ->
             Log.d(TAG, "BC score: ${bcResult.score}")
-//            if (bcResult.score > 0.2) {
-//                val audioWriter = AudioWriter()
-//                val filePath = context.filesDir.absolutePath + "/" + System.currentTimeMillis() + "_" + bcResult.score + ".wav"
-//                Log.d(TAG, "Writing audio to $filePath")
-//                audioWriter.writeWavFile(filePath, SAMPLE_RATE, buffer)
-//            }
+            if (SAVE_FILE_FOR_DEBUG && bcResult.score > 0.5) {
+                val audioWriter = AudioWriter()
+                val filePath = context.filesDir.absolutePath + "/" + System.currentTimeMillis() + "_" + bcResult.score + ".wav"
+                Log.d(TAG, "Writing audio to $filePath")
+                audioWriter.writeWavFile(filePath, SAMPLE_RATE, buffer)
+            }
             if (bcResult.score > bcThreshold) {
                 detectConvModel(buffer)?.also {convResult ->
                     Log.d(TAG, "Conv score: ${convResult.score}")
@@ -163,6 +164,7 @@ class TriggerWordDetectionFlow private constructor(
         const val SAMPLE_CHANNELS = AudioFormat.CHANNEL_IN_MONO
         const val SAMPLE_ENCODING = AudioFormat.ENCODING_PCM_FLOAT
         const val SILENCE_THRESHOLD = -25.0 // dB
+        const val SAVE_FILE_FOR_DEBUG = false
 
         @SuppressLint("StaticFieldLeak")
         private var instance : TriggerWordDetectionFlow? = null
