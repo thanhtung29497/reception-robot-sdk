@@ -1,8 +1,9 @@
 package com.example.smart_robot.speech
 
-abstract class TriggerWordEventListener {
+import com.example.smart_robot.common.EventListener
+
+abstract class TriggerWordEventListener : EventListener<TriggerWordError>() {
     abstract fun onTriggerWordDetected()
-    abstract fun onError(error: TriggerWordError)
     abstract fun onEnd()
 }
 

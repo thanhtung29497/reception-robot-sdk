@@ -95,7 +95,7 @@ abstract class AudioRecordingForAIModel (
             val tempBuffer = FloatArray(sampleWindowStride)
             onBeforeRecording()
 
-            while (isRecording) {
+            while (isRecording && state != AudioRecord.STATE_UNINITIALIZED && recordingState == AudioRecord.RECORDSTATE_RECORDING) {
                 val byteRead = read(tempBuffer, 0, tempBuffer.size, AudioRecord.READ_BLOCKING)
                 if (byteRead > 0) {
                     audioBuffer.addAll(tempBuffer.toList())
