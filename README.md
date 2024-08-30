@@ -66,6 +66,8 @@ A Flutter plugin for the smart robot project. This plugin is used to detect the 
     @override
     void onTriggerWordDetected() {
       print('Trigger word detected');
+      // Stop the audio track if playing
+      // Start VAD for the next conversation turn
       _smartRobotPlugin.startVAD();
     }
       
@@ -77,7 +79,9 @@ A Flutter plugin for the smart robot project. This plugin is used to detect the 
     @override
     void onSpeechEnd() {
       print('Speech end');
-      // Send the ending signal to the server
+      // Send the ending signal to the server, play loading animation to wait for the response
+      // Stop the VAD to end the conversation turn of the user
+      _smartRobotPlugin.stopVAD();
     }
       
     @override
