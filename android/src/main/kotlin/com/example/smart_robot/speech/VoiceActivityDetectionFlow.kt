@@ -6,6 +6,7 @@ import android.content.res.AssetManager
 import android.media.AudioFormat
 import android.util.Log
 import com.example.smart_robot.VAD
+import com.example.smart_robot.common.EventEmitter
 import com.example.smart_robot.io.audio.AudioRecordingForAIModel
 import kotlin.math.abs
 import kotlin.math.log10
@@ -13,10 +14,9 @@ import kotlin.math.log10
 class VoiceActivityDetectionFlow private constructor(
     private val context: Context,
     private val assetManager: AssetManager
-) {
+) : EventEmitter<VoiceActivityEventListener, VADError>() {
 
     private lateinit var vadModel: VAD
-    private val listeners = mutableListOf<VoiceActivityEventListener>()
     private var noSpeechYet = true
     private var silenceTimeInFrames = 0
     private var timeoutInMilliseconds: Int? = (TIMEOUT_IN_SECONDS * 1000).toInt()
@@ -34,6 +34,7 @@ class VoiceActivityDetectionFlow private constructor(
                 noSpeechYet = true
                 silenceTimeInFrames = 0
                 clearBuffer()
+                Log.d(VoiceActivityDetectionFlow.TAG, "Start listening for voice activity")
             }
 
             override fun onBufferFilled(buffer: FloatArray) {
@@ -45,14 +46,12 @@ class VoiceActivityDetectionFlow private constructor(
                         isSpeech && noSpeechYet -> {
                             noSpeechYet = false
                             silenceTimeInFrames = 0
-                            listeners.forEach { listener ->
-                                listener.onFirstVADDetected(buffer)
-                            }
+                            emit { onFirstVADDetected(buffer) }
                         }
 
                         isSpeech && !noSpeechYet ->
-                            listeners.forEach { listener ->
-                                listener.onVADDetected(buffer.toList().subList(
+                            emit {
+                                onVADDetected(buffer.toList().subList(
                                     SAMPLE_WINDOW_SIZE - SAMPLE_WINDOW_STRIDE, SAMPLE_WINDOW_SIZE
                                 ).toFloatArray())
                             }
@@ -60,9 +59,7 @@ class VoiceActivityDetectionFlow private constructor(
                         !isSpeech && !noSpeechYet -> {
                             noSpeechYet = true
                             silenceTimeInFrames += SAMPLE_WINDOW_SIZE
-                            listeners.forEach { listener ->
-                                listener.onLastVADDetected()
-                            }
+                            emit { onLastVADDetected() }
                         }
 
                         // not speech and no speech yet
@@ -73,22 +70,17 @@ class VoiceActivityDetectionFlow private constructor(
 
                     if (!isSpeech) {
                         val silenceTimeInMilliseconds = (silenceTimeInFrames.toFloat() / SAMPLE_RATE * 1000)
-//                            Log.d(VoiceActivityDetectionFlow.TAG, "Silence time: %.2f".format(silenceTimeInMilliseconds))
                         if (timeoutInMilliseconds != null &&
                             silenceTimeInMilliseconds >= timeoutInMilliseconds!!) {
                             Log.d(VoiceActivityDetectionFlow.TAG, "Stop VAD due to timeout")
-                            listeners.forEach { listener ->
-                                listener.onVADTimeout()
-                            }
+                            emit { onVADTimeout() }
                             stop()
                         }
                     }
 
                 } catch (e: Exception) {
                     Log.e(VoiceActivityDetectionFlow.TAG, "Error running the VAD model", e)
-                    listeners.forEach { listener ->
-                        listener.onVADError(VADError.ErrorRunModel)
-                    }
+                    emitError(VADError.ErrorRunModel)
                 }
             }
         }
@@ -121,26 +113,23 @@ class VoiceActivityDetectionFlow private constructor(
 
     /**
      * Start the voice activity detection flow
-     * @param listener the listener to listen to the events
      * @param timeoutInMilliseconds the maximum time of silence before the flow ends, leave it null to disable the timeout
      */
-    fun startRecording(listener: VoiceActivityEventListener, timeoutInMilliseconds: Int? = null) {
+    fun startRecording(timeoutInMilliseconds: Int? = null) {
         if (!audioRecorder.isRecording) {
             try {
                 this.timeoutInMilliseconds = timeoutInMilliseconds
                 audioRecorder.startRecording()
             } catch (e: SecurityException) {
                 Log.e(TAG, "Error starting the VAD flow", e)
-                listener.onVADError(VADError.ErrorAudioPermission)
+                emitError(VADError.ErrorAudioPermission)
             } catch (e: Exception) {
                 Log.e(TAG, "Error starting the VAD flow", e)
-                listener.onVADError(VADError.ErrorAudioRecord)
+                emitError(VADError.ErrorAudioRecord)
             }
         } else {
-            Log.w(TriggerWordDetectionFlow.TAG, "VAD flow are already recording")
+            Log.w(TAG, "Cannot start the VAD flow because it is already started")
         }
-
-        listeners.add(listener)
     }
 
     /**
@@ -149,12 +138,9 @@ class VoiceActivityDetectionFlow private constructor(
     fun stop() {
         if (audioRecorder.isRecording) {
             audioRecorder.stopRecording()
-            listeners.forEach { listener ->
-                listener.onVADEnd()
-            }
-            listeners.clear()
+            emit { onVADEnd() }
         } else {
-            Log.w(TriggerWordDetectionFlow.TAG, "VAD flow are not recording")
+            Log.w(TAG, "Cannot stop the VAD flow because it is not started")
         }
     }
 

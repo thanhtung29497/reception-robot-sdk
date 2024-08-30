@@ -7,6 +7,7 @@ import android.media.AudioFormat
 import android.util.Log
 import com.example.smart_robot.AudioWriter
 import com.example.smart_robot.TriggerWord
+import com.example.smart_robot.common.EventEmitter
 import com.example.smart_robot.io.audio.AudioRecordingForAIModel
 import kotlin.math.abs
 import kotlin.math.log10
@@ -16,11 +17,9 @@ class TriggerWordDetectionFlow private constructor(
     private val assetManager: AssetManager,
     private val bcThreshold: Float = 0.6f,
     private val convThreshold: Float = 0.6f
-) {
+) : EventEmitter<TriggerWordEventListener, TriggerWordError>() {
 
     private lateinit var triggerWord: TriggerWord
-
-    private val listeners = mutableListOf<TriggerWordEventListener>()
 
     private val audioRecorder: AudioRecordingForAIModel by lazy {
         object : AudioRecordingForAIModel(
@@ -33,6 +32,7 @@ class TriggerWordDetectionFlow private constructor(
         ) {
             override fun onBeforeRecording() {
                 clearBuffer()
+                Log.d(TriggerWordDetectionFlow.TAG, "Start listening for trigger word")
             }
 
             override fun onBufferFilled(buffer: FloatArray) {
@@ -41,21 +41,15 @@ class TriggerWordDetectionFlow private constructor(
                     isTriggerWord(buffer)?.let {
                         // Clear the buffer to avoid multiple trigger word detection
                         clearBuffer()
-                        Log.d(TAG, "Trigger word detected")
-                        listeners.forEach { listener ->
-                            listener.onTriggerWordDetected()
-                        }
+                        Log.d(TriggerWordDetectionFlow.TAG, "Trigger word detected")
+                        emit { onTriggerWordDetected() }
                     }
                 } catch (e: Exception) {
-                    listeners.forEach { listener ->
-                        listener.onError(TriggerWordError.ErrorRunModel)
-                    }
+                    emit { onError(TriggerWordError.ErrorRunModel) }
                 }
             }
         }
     }
-
-
 
     /**
      * Initialize the trigger word detection model
@@ -67,9 +61,7 @@ class TriggerWordDetectionFlow private constructor(
                 initModel(assetManager)
             }
         } catch (e: Exception) {
-            listeners.forEach { listener ->
-                listener.onError(TriggerWordError.ErrorInitModel)
-            }
+            emit { onError(TriggerWordError.ErrorInitModel) }
         }
     }
 
@@ -89,7 +81,9 @@ class TriggerWordDetectionFlow private constructor(
 
     /**
      * run the trigger word detection model flow
+     * @param buffer the audio buffer in PCM_FLOAT format
      */
+    // TODO: Implement the double-threshold technique to improve the trigger word detection
     private fun isTriggerWord(buffer: FloatArray): TriggerWord.Obj? {
         // Calculate the dB of the buffer, if the dB is less than the silence threshold, not process the buffer
         val db = 20 * log10(buffer.maxOf { abs(it) })
@@ -125,32 +119,27 @@ class TriggerWordDetectionFlow private constructor(
      * @param listener the listener to be notified when the trigger word is detected
      */
 
-    fun startListening(listener: TriggerWordEventListener) {
+    fun startListening() {
         if (!audioRecorder.isRecording) {
             try {
                 audioRecorder.startRecording()
             } catch (e: SecurityException) {
-                listener.onError(TriggerWordError.ErrorAudioPermission)
+                emitError(TriggerWordError.ErrorAudioPermission)
             } catch (e: Exception) {
-                listener.onError(TriggerWordError.ErrorAudioRecord)
+                emitError(TriggerWordError.ErrorAudioRecord)
             }
         } else {
-            Log.w(TAG, "Trigger word flow are already recording")
+            Log.w(TAG, "Cannot start the trigger word flow because it is already started")
         }
-
-        listeners.add(listener)
     }
 
     fun stop() {
         if (audioRecorder.isRecording) {
             audioRecorder.stopRecording()
-            listeners.forEach { listener ->
-                listener.onEnd()
-            }
-
-            listeners.clear()
+            Log.d(TAG, "Stop listening for trigger word")
+            emit { onEnd() }
         } else {
-            Log.w(TAG, "Trigger word flow are not recording")
+            Log.w(TAG, "Cannot stop the trigger word flow because it is not started")
         }
     }
 
@@ -166,6 +155,7 @@ class TriggerWordDetectionFlow private constructor(
         const val SILENCE_THRESHOLD = -25.0 // dB
         const val SAVE_FILE_FOR_DEBUG = false
 
+        // Singleton pattern
         @SuppressLint("StaticFieldLeak")
         private var instance : TriggerWordDetectionFlow? = null
 

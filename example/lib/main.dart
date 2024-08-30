@@ -9,6 +9,7 @@ import 'package:smart_robot/audio_event.dart';
 import 'package:smart_robot/audio_event_listener.dart';
 import 'package:smart_robot/smart_robot.dart';
 import 'package:fluttertoast/fluttertoast.dart';
+import 'package:just_audio/just_audio.dart';
 import 'package:web_socket_channel/io.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
@@ -30,6 +31,7 @@ class _MyAppState extends State<MyApp> implements AudioEventListener {
   bool isSpeech = false;
   String path = "";
   IOWebSocketChannel? channel;
+  final _audioPlayer = AudioPlayer();
 
   void _showAlertDialog(BuildContext context, String title, String content) {
     showDialog(
@@ -61,13 +63,18 @@ class _MyAppState extends State<MyApp> implements AudioEventListener {
         backgroundColor: const Color(0xCCFFFFFF),
         textColor: Colors.black,
     );
-    // _smartRobotPlugin.stopTriggerWord();
-    // _smartRobotPlugin.startVAD(30000);
+    print("Trigger word detected");
+    if (_audioPlayer.playing) {
+      _audioPlayer.stop();
+    }
+    _smartRobotPlugin.stopVAD();
+    _smartRobotPlugin.startVAD();
   }
 
   @override
   void onSpeaking(VADEvent event) {
     if (channel != null) {
+      print("On speaking with type: ${event.type.index}, data length: ${event.audioSegment.length}");
       final data = base64.encode(event.audioSegment);
 
       final message = jsonEncode({
@@ -76,16 +83,20 @@ class _MyAppState extends State<MyApp> implements AudioEventListener {
       });
 
       channel!.sink.add(message);
+
+      print("Send data to websocket with flag ${event.type.index}, data length: ${event.audioSegment.length}");
     }
   }
 
   @override
   void onSpeechEnd() {
     if (channel != null) {
+      print("Send end speech to websocket");
       channel!.sink.add(jsonEncode({
         "data": "",
         "flag": 2,
       }));
+      _smartRobotPlugin.stopVAD();
     }
   }
 
@@ -93,7 +104,6 @@ class _MyAppState extends State<MyApp> implements AudioEventListener {
   void onSilenceTimeout() {
     Fluttertoast.showToast(msg: "VAD Timeout");
     _smartRobotPlugin.stopVAD();
-    // _smartRobotPlugin.startTriggerWord();
   }
 
   @override
@@ -128,9 +138,31 @@ class _MyAppState extends State<MyApp> implements AudioEventListener {
       print("Websocket server connected!");
 
       // listen to websocket
-      channel?.stream.listen((event) {
+      channel?.stream.listen((event) async {
         print("Event from websocket: $event");
-        // display speech-to-text result here
+        // extract data from websocket under json format
+
+        try {
+          final data = jsonDecode(event);
+          final flag = data["flag"];
+          final type = data["type"];
+          if (flag == 2 && type == 2) {
+            if (data["chatbot"] != null) {
+              final text = data["chatbot"]["text"];
+              Fluttertoast.showToast(msg: text);
+            }
+
+            final audioUrl = data["url"];
+            if (audioUrl != null) {
+              await playAudio(audioUrl);
+            }
+            _smartRobotPlugin.startVAD();
+          }
+        } catch (e) {
+          print("Error when parse data from websocket: $e");
+          _smartRobotPlugin.startVAD();
+        }
+
       }, onError: (error) {
         print("Error from websocket: $error");
       }, onDone: () {
@@ -139,6 +171,14 @@ class _MyAppState extends State<MyApp> implements AudioEventListener {
     } on WebSocketChannelException catch (e) {
       print("Error when connect to websocket: $e");
     }
+  }
+
+  /// Play audio url
+  Future<void> playAudio(String url) async {
+    final duration = await _audioPlayer.setUrl(url);
+    print("Play audio with duration: $duration");
+    await _audioPlayer.play();
+    print("Finish play audio");
   }
 
   // Platform messages are asynchronous, so we initialize in an async method.
