@@ -4,5 +4,6 @@ abstract class AudioEventListener {
   void onTriggerWordDetected();
   void onSpeaking(VADEvent event);
   void onSpeechEnd();
+  void onVADEnd();
   void onSilenceTimeout();
 }

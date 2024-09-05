@@ -2,6 +2,7 @@ class AudioEventType {
   static const triggerWordDetected = 'TRIGGER_WORD_DETECTED';
   static const vadRecording = 'VAD_RECORDING';
   static const vadTimeout = 'VAD_TIMEOUT';
+  static const vadEnd = 'VAD_END';
 }
 
 enum VADEventType {

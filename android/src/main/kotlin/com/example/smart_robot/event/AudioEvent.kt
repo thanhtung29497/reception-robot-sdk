@@ -8,6 +8,7 @@ class AudioEvent (
     enum class Type {
         TRIGGER_WORD_DETECTED,
         VAD_RECORDING,
+        VAD_END,
         VAD_TIMEOUT
     }
 
@@ -22,5 +23,6 @@ class AudioEvent (
         fun triggerWordDetected() = AudioEvent(Type.TRIGGER_WORD_DETECTED).toMap()
         fun vadRecording(data: RecordedSegment) = AudioEvent(Type.VAD_RECORDING, data).toMap()
         fun vadTimeout() = AudioEvent(Type.VAD_TIMEOUT).toMap()
+        fun vadEnd() = AudioEvent(Type.VAD_END).toMap()
     }
 }

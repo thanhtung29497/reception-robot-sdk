@@ -168,6 +168,9 @@ class SmartRobotPlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHa
 
             override fun onVADEnd() {
                 Log.d(TAG, "VAD flow ended")
+                GlobalScope.launch(Dispatchers.Main) {
+                    eventSink?.success(AudioEvent.vadEnd())
+                }
             }
 
             override fun onVADTimeout() {
