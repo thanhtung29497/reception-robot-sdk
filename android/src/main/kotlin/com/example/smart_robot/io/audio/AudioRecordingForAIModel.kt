@@ -23,6 +23,9 @@ abstract class AudioRecordingForAIModel (
     private val sampleWindowStride: Int,
 ) {
 
+    var sessionId: String? = null
+        private set
+
     private val bufferSize: Int by lazy {
         AudioRecord.getMinBufferSize(
             sampleRate,
@@ -64,11 +67,14 @@ abstract class AudioRecordingForAIModel (
     abstract fun onBufferFilled(buffer: FloatArray)
 
     @OptIn(DelicateCoroutinesApi::class)
-    fun startRecording() {
+    fun startRecording(): String {
         checkPermission() ?: run {
             Log.w(TAG, "Permission not granted")
             throw SecurityException("Permission not granted")
         }
+
+        // Generate a new random session ID
+        sessionId = System.currentTimeMillis().toString()
 
         try {
             audioRecord = AudioRecord(
@@ -84,6 +90,8 @@ abstract class AudioRecordingForAIModel (
                     recordingCoroutine()
                 }
             }
+
+            return sessionId!!
         } catch (e: Exception) {
             Log.e(TAG, "Error initializing AudioRecord", e)
             throw e

@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:developer';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'dart:async';
@@ -32,7 +31,6 @@ class _MyAppState extends State<MyApp> implements AudioEventListener {
   String path = "";
   IOWebSocketChannel? channel;
   final _audioPlayer = AudioPlayer();
-  bool isSpeaking = false;
 
   void _showAlertDialog(BuildContext context, String title, String content) {
     showDialog(
@@ -76,7 +74,6 @@ class _MyAppState extends State<MyApp> implements AudioEventListener {
   @override
   void onSpeaking(VADEvent event) {
     if (channel != null) {
-      isSpeaking = true;
       print("On speaking with type: ${event.type.index}, data length: ${event.audioSegment.length}");
       final data = base64.encode(event.audioSegment);
 
@@ -94,7 +91,6 @@ class _MyAppState extends State<MyApp> implements AudioEventListener {
   @override
   void onSpeechEnd() {
     if (channel != null) {
-      isSpeaking = false;
       print("Send end speech to websocket");
       channel!.sink.add(jsonEncode({
         "data": "",
@@ -108,19 +104,6 @@ class _MyAppState extends State<MyApp> implements AudioEventListener {
   void onSilenceTimeout() {
     Fluttertoast.showToast(msg: "VAD Timeout");
     _smartRobotPlugin.stopVAD();
-  }
-
-  @override
-  void onVADEnd() {
-    print("isSpeaking: $isSpeaking");
-    if (isSpeaking && channel != null) {
-      isSpeaking = false;
-      print("Send last speech to websocket");
-      channel!.sink.add(jsonEncode({
-        "data": "",
-        "flag": 2,
-      }));
-    }
   }
 
   @override
