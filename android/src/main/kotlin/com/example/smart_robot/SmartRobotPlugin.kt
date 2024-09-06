@@ -1,19 +1,13 @@
 package com.example.smart_robot
 
-import android.Manifest
 import android.content.Context
-import android.content.pm.PackageManager
 import android.content.res.AssetManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.media.AudioFormat
-import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.AudioTrack
-import android.media.MediaRecorder
 import android.net.Uri
 import android.util.Log
-import androidx.core.app.ActivityCompat
 import com.example.smart_robot.event.AudioEvent
 import com.example.smart_robot.event.RecordedSegment
 import com.example.smart_robot.speech.TriggerWordDetectionFlow
@@ -35,8 +29,6 @@ import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
 import org.json.JSONStringer
 import java.io.File
-import kotlin.math.abs
-import kotlin.math.log10
 
 
 /** SmartRobotPlugin */
@@ -85,7 +77,6 @@ class SmartRobotPlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHa
 
         triggerWordDetectionFlow = TriggerWordDetectionFlow.getInstance(context, assetManager)
         voiceActivityDetectionFlow = VoiceActivityDetectionFlow.getInstance(context, assetManager)
-
         handleSpeechEvent()
     }
 
@@ -196,19 +187,9 @@ class SmartRobotPlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHa
                 result.success("success")
             }
 
-            Constants.detectTriggerWord -> {
-                val filePath = call.argument<String>("audioPath")
-                detectTriggerWord(result, filePath)
-            }
-
             Constants.initVAD -> {
                 voiceActivityDetectionFlow.initModel()
                 result.success("success")
-            }
-
-            Constants.detectVAD -> {
-                val filePath = call.argument<String>("audioPath")
-                detectVAD(result, filePath)
             }
 
             Constants.startVAD -> {
@@ -219,7 +200,7 @@ class SmartRobotPlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHa
                 result.success("success")
             }
 
-            Constants.startRecord -> {
+            Constants.startTriggerWord -> {
                 triggerWordDetectionFlow.startListening()
             }
 
@@ -371,26 +352,26 @@ class SmartRobotPlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHa
         waveFormExtractor.stop()
     }
 
-    private fun detectVAD(result: Result, filePath: String?) {
-        val waveFormExtractor = WaveformExtractor(
-            context = context,
-            methodChannel = channel,
-            expectedPoints = 100,
-            key = "audioPath",
-            result = result,
-            path = filePath ?: "",
-            extractorCallBack = object : ExtractorCallBack {
-                override fun onProgress(value: ArrayList<Float>) {
-                    Log.d("VAD", value.toString())
-                    println(value)
-                    val triggerWord = vad.detectVAD(value.toFloatArray())
-                    result.success(triggerWord?.score?.toString() ?: "null")
-                }
-            }
-        )
-        waveFormExtractor.startDecode()
-        waveFormExtractor.stop()
-    }
+//    private fun detectVAD(result: Result, filePath: String?) {
+//        val waveFormExtractor = WaveformExtractor(
+//            context = context,
+//            methodChannel = channel,
+//            expectedPoints = 100,
+//            key = "audioPath",
+//            result = result,
+//            path = filePath ?: "",
+//            extractorCallBack = object : ExtractorCallBack {
+//                override fun onProgress(value: ArrayList<Float>) {
+//                    Log.d("VAD", value.toString())
+//                    println(value)
+//                    val triggerWord = vad.detectVAD(value.toFloatArray())
+//                    result.success(triggerWord?.score?.toString() ?: "null")
+//                }
+//            }
+//        )
+//        waveFormExtractor.startDecode()
+//        waveFormExtractor.stop()
+//    }
 
     private fun playWaveformAudio(audio : ShortArray?) {
         if (audio == null ) {

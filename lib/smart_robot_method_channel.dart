@@ -62,7 +62,7 @@ class MethodChannelSmartRobot extends SmartRobotPlatform {
 
   @override
   Future<void> startTriggerWord() async {
-    await methodChannel.invokeMethod<void>('startRecord');
+    await methodChannel.invokeMethod<void>('startTriggerWord');
   }
 
   @override

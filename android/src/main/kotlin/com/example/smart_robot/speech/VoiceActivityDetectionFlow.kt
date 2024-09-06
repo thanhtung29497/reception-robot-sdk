@@ -21,6 +21,7 @@ class VoiceActivityDetectionFlow private constructor(
     private var silenceTimeInFrames = 0
     private var timeoutInMilliseconds: Int? = (TIMEOUT_IN_SECONDS * 1000).toInt()
     private var currentSessionId: String? = null
+    private var isSessionStarted = false
 
     private val audioRecorder: AudioRecordingForAIModel by lazy {
         object : AudioRecordingForAIModel(
@@ -36,9 +37,6 @@ class VoiceActivityDetectionFlow private constructor(
                 silenceTimeInFrames = 0
                 clearBuffer()
 
-                // Check if the session ID is still the same, if not, stop the previous session
-                emitIfSessionIdNotMatch(sessionId) { onLastVADDetected() }
-
                 Log.d(VoiceActivityDetectionFlow.TAG, "Start listening for voice activity")
             }
 
@@ -51,7 +49,10 @@ class VoiceActivityDetectionFlow private constructor(
                         isSpeech && noSpeechYet -> {
                             noSpeechYet = false
                             silenceTimeInFrames = 0
-                            emitIfSessionIdMatch(sessionId) { onFirstVADDetected(buffer) }
+                            emitIfSessionIdMatch(sessionId) {
+                                isSessionStarted = true
+                                onFirstVADDetected(buffer)
+                            }
                         }
 
                         isSpeech && !noSpeechYet ->
@@ -59,6 +60,7 @@ class VoiceActivityDetectionFlow private constructor(
                                 val sendBuffer = buffer.toList().subList(
                                     SAMPLE_WINDOW_SIZE - SAMPLE_WINDOW_STRIDE, SAMPLE_WINDOW_SIZE
                                 ).toFloatArray()
+                                isSessionStarted = true
 
                                 onVADDetected(sendBuffer)
                             }
@@ -66,7 +68,10 @@ class VoiceActivityDetectionFlow private constructor(
                         !isSpeech && !noSpeechYet -> {
                             noSpeechYet = true
                             silenceTimeInFrames += SAMPLE_WINDOW_SIZE
-                            emitIfSessionIdMatch(sessionId) { onLastVADDetected() }
+                            emitIfSessionIdMatch(sessionId) {
+                                isSessionStarted = false
+                                onLastVADDetected()
+                            }
                         }
 
                         // not speech and no speech yet
@@ -96,13 +101,6 @@ class VoiceActivityDetectionFlow private constructor(
     private fun emitIfSessionIdMatch(sessionId: String?,
                                      block: VoiceActivityEventListener.() -> Unit) {
         if (currentSessionId != null && currentSessionId == sessionId) {
-            emit { block() }
-        }
-    }
-
-    private fun emitIfSessionIdNotMatch(sessionId: String?,
-                                        block: VoiceActivityEventListener.() -> Unit) {
-        if (currentSessionId == null || currentSessionId != sessionId) {
             emit { block() }
         }
     }
@@ -159,6 +157,10 @@ class VoiceActivityDetectionFlow private constructor(
     fun stop() {
         if (audioRecorder.isRecording) {
             currentSessionId = null
+            if (isSessionStarted) {
+                isSessionStarted = false
+                emit { onLastVADDetected() }
+            }
             audioRecorder.stopRecording()
         } else {
             Log.w(TAG, "Cannot stop the VAD flow because it is not started")
