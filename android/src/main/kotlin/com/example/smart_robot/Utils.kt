@@ -11,7 +11,7 @@ object Constants {
     const val detectTriggerWord = "detectTriggerWord"
     const val initVAD = "initVADModel"
     const val detectVAD = "detectVAD"
-    const val startRecord = "startRecord"
+    const val startTriggerWord = "startTriggerWord"
     const val stopTriggerWord = "stopTriggerWord"
     const val startVAD = "startVAD"
     const val stopVAD = "stopVAD"

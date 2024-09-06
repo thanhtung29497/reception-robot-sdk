@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:developer';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'dart:async';
@@ -63,6 +62,7 @@ class _MyAppState extends State<MyApp> implements AudioEventListener {
         backgroundColor: const Color(0xCCFFFFFF),
         textColor: Colors.black,
     );
+
     print("Trigger word detected");
     if (_audioPlayer.playing) {
       _audioPlayer.stop();
