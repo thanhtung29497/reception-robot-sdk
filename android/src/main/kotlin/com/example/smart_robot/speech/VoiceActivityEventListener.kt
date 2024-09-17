@@ -7,6 +7,7 @@ abstract class VoiceActivityEventListener : EventListener<VADError>() {
     abstract fun onVADDetected(segment: FloatArray)
     abstract fun onLastVADDetected()
     abstract fun onVADTimeout()
+    open fun onVADEnd() {}
 }
 
 enum class VADError {

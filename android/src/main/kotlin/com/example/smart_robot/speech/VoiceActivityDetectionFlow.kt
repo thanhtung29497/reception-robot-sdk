@@ -159,7 +159,7 @@ class VoiceActivityDetectionFlow private constructor(
             currentSessionId = null
             if (isSessionStarted) {
                 isSessionStarted = false
-                emit { onLastVADDetected() }
+                emit { onVADEnd() }
             }
             audioRecorder.stopRecording()
         } else {

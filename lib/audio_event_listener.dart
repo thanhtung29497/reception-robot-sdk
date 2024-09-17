@@ -5,4 +5,5 @@ abstract class AudioEventListener {
   void onSpeaking(VADEvent event);
   void onSpeechEnd();
   void onSilenceTimeout();
+  void onVADEnd();
 }
