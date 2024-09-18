@@ -163,6 +163,12 @@ class SmartRobotPlugin : FlutterPlugin, MethodCallHandler, EventChannel.StreamHa
                 }
             }
 
+            override fun onVADEnd() {
+                GlobalScope.launch(Dispatchers.Main) {
+                    eventSink?.success(AudioEvent.vadEnd())
+                }
+            }
+
         })
     }
 

@@ -40,6 +40,10 @@ class SmartRobot {
               listener.onSilenceTimeout();
             }
             break;
+          case AudioEventType.vadEnd:
+            for (final listener in _audioEventListeners) {
+              listener.onVADEnd();
+            }
         }
       }
     });

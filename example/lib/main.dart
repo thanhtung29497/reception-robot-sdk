@@ -101,6 +101,17 @@ class _MyAppState extends State<MyApp> implements AudioEventListener {
   }
 
   @override
+  void onVADEnd() {
+    if (channel != null) {
+      print("Send end speech to websocket");
+      channel!.sink.add(jsonEncode({
+        "data": "",
+        "flag": 2,
+      }));
+    }
+  }
+
+  @override
   void onSilenceTimeout() {
     Fluttertoast.showToast(msg: "VAD Timeout");
     _smartRobotPlugin.stopVAD();
