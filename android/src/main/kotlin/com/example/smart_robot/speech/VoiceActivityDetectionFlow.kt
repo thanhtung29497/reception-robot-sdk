@@ -22,6 +22,7 @@ class VoiceActivityDetectionFlow private constructor(
     private var timeoutInMilliseconds: Int? = (TIMEOUT_IN_SECONDS * 1000).toInt()
     private var currentSessionId: String? = null
     private var isSessionStarted = false
+    private var startCountingSilence = false
 
     private val audioRecorder: AudioRecordingForAIModel by lazy {
         object : AudioRecordingForAIModel(
@@ -35,6 +36,7 @@ class VoiceActivityDetectionFlow private constructor(
             override fun onBeforeRecording() {
                 noSpeechYet = true
                 silenceTimeInFrames = 0
+                startCountingSilence = false
                 clearBuffer()
 
                 Log.d(VoiceActivityDetectionFlow.TAG, "Start listening for voice activity")
@@ -66,11 +68,31 @@ class VoiceActivityDetectionFlow private constructor(
                             }
 
                         !isSpeech && !noSpeechYet -> {
-                            noSpeechYet = true
-                            silenceTimeInFrames += SAMPLE_WINDOW_SIZE
-                            emitIfSessionIdMatch(sessionId) {
-                                isSessionStarted = false
-                                onLastVADDetected()
+                            silenceTimeInFrames += if (!startCountingSilence) {
+                                startCountingSilence = true
+                                SAMPLE_WINDOW_SIZE
+                            } else {
+                                SAMPLE_WINDOW_STRIDE
+                            }
+
+                            Log.d(VoiceActivityDetectionFlow.TAG, silenceTimeInFrames.toString())
+
+                            if (silenceTimeInFrames >= SILENCE_SAMPLE_BEFORE_INTERRUPTION) {
+                                noSpeechYet = true
+                                startCountingSilence = false
+                                emitIfSessionIdMatch(sessionId) {
+                                    isSessionStarted = false
+                                    onLastVADDetected()
+                                }
+                            } else {
+                                emitIfSessionIdMatch(sessionId) {
+                                    val sendBuffer = buffer.toList().subList(
+                                        SAMPLE_WINDOW_SIZE - SAMPLE_WINDOW_STRIDE, SAMPLE_WINDOW_SIZE
+                                    ).toFloatArray()
+                                    isSessionStarted = true
+
+                                    onVADDetected(sendBuffer)
+                                }
                             }
                         }
 
@@ -178,6 +200,8 @@ class VoiceActivityDetectionFlow private constructor(
         const val SAMPLE_WINDOW_STRIDE = (WINDOW_STRIDE * SAMPLE_RATE).toInt()
         private const val TIMEOUT_IN_SECONDS = 10.0 // seconds
         private const val SILENCE_THRESHOLD = -25.0f // dB
+        private const val SILENCE_DURATION_BEFORE_INTERRUPTION = 3.0 // seconds
+        const val SILENCE_SAMPLE_BEFORE_INTERRUPTION = (SILENCE_DURATION_BEFORE_INTERRUPTION * SAMPLE_RATE).toInt()
 
         @SuppressLint("StaticFieldLeak")
         private var instance : VoiceActivityDetectionFlow? = null
